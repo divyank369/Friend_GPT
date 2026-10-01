@@ -1,0 +1,338 @@
+.chatWindow{
+    background-color: #212121;
+    height: 100vh;
+    width:100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items:center;
+    text-align: center ;
+
+}
+/* NAVBAR PART */
+.navbar{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    
+}
+.navbar > span{
+    margin: 1rem 2rem;
+}
+.userIconDiv{
+    margin: 1rem 2rem;
+    position: relative;
+
+}
+.userIcon{
+    background-color:#339cff;
+    height: 25px;
+    width: 25px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border: 0;
+    padding: 0;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    overflow: hidden;
+}
+.userIcon:focus-visible {
+    outline: 2px solid #b9d8d0;
+    outline-offset: 3px;
+}
+.userIcon img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.account-menu {
+    position: absolute;
+    z-index: 5;
+    top: calc(100% + 4px);
+    right: 0;
+    width: 240px;
+    padding: 8px;
+    border: 1px solid #3b3b3b;
+    border-radius: 8px;
+    background-color: #242424;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+    text-align: left;
+}
+.account-menu-user {
+    display: grid;
+    gap: 4px;
+    padding: 10px;
+    border-bottom: 1px solid #3b3b3b;
+}
+.account-menu-user strong {
+    overflow: hidden;
+    color: #f4f4f4;
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.account-menu-user span {
+    overflow: hidden;
+    margin: 0;
+    color: #aaa;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.account-menu > button {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 5px;
+    padding: 10px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: #ececec;
+    cursor: pointer;
+    font-size: 13px;
+    text-align: left;
+}
+.account-menu > button:hover,
+.account-menu > button:focus-visible {
+    background-color: #363636;
+    
+}
+.account-menu > button i {
+    width: 16px;
+    color: #aaa;
+    text-align: center;
+}
+.account-dialog-backdrop {
+    position: fixed;
+    z-index: 20;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    background: rgba(0, 0, 0, 0.62);
+}
+.account-dialog {
+    width: min(100%, 440px);
+    box-sizing: border-box;
+    border: 1px solid #424242;
+    border-radius: 9px;
+    background: #242424;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+    text-align: left;
+}
+.account-dialog-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 22px 22px 17px;
+    border-bottom: 1px solid #393939;
+}
+.account-dialog-header p {
+    margin: 0 0 7px;
+    color: #a8c9bf;
+    font-size: 10px;
+    font-weight: 700;
+}
+.account-dialog-header h2 {
+    margin: 0;
+    color: #f2f2f2;
+    font-size: 20px;
+}
+.account-dialog-close {
+    width: 32px;
+    height: 32px;
+    flex: 0 0 auto;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: #aaa;
+    cursor: pointer;
+}
+.account-dialog-close:hover,
+.account-dialog-close:focus-visible {
+    background: #383838;
+    color: #fff;
+}
+.account-dialog-content {
+    display: grid;
+    gap: 18px;
+    padding: 20px 22px 22px;
+}
+.settings-account {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-bottom: 17px;
+    border-bottom: 1px solid #393939;
+}
+.settings-avatar {
+    width: 40px;
+    height: 40px;
+    display: grid;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 50%;
+    background: #339cff;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 700;
+}
+.settings-account div,
+.settings-toggle > span {
+    min-width: 0;
+    display: grid;
+    gap: 5px;
+}
+.settings-account strong,
+.settings-toggle strong {
+    color: #eee;
+    font-size: 13px;
+}
+.settings-account div > span {
+    overflow: hidden;
+    color: #aaa;
+    font-size: 12px;
+    text-overflow: ellipsis;
+}
+.settings-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    cursor: pointer;
+}
+.settings-toggle small {
+    color: #aaa;
+    font-size: 12px;
+    line-height: 1.4;
+}
+.settings-toggle input {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 0;
+    border-radius: 4px;
+    background: transparent;
+    box-shadow: none;
+    accent-color: #a8c9bf;
+    cursor: pointer;
+}
+.plan-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px;
+    border: 1px solid #4a4a4a;
+    border-radius: 6px;
+    background: #1c1c1c;
+}
+.plan-option p {
+    margin: 0 0 6px;
+    color: #aaa;
+    font-size: 10px;
+    font-weight: 700;
+}
+.plan-option h3 {
+    margin: 0;
+    color: #f2f2f2;
+    font-size: 17px;
+}
+.current-plan {
+    color: #b9d8d0;
+    font-size: 10px;
+    font-weight: 700;
+}
+.billing-notice {
+    margin: 0;
+    color: #b8b8b8;
+    font-size: 13px;
+    line-height: 1.5;
+}
+.plan-upgrade-button {
+    min-height: 42px;
+    border: 0;
+    border-radius: 5px;
+    background: #4b4b4b;
+    color: #bdbdbd;
+    cursor: not-allowed;
+    font-size: 13px;
+    font-weight: 700;
+}
+/* CHAT INPUT */
+.chatInput{
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+
+}
+.inputBox{
+    width: 100%;
+    position: relative;
+    max-width: 700px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+input{
+    font-size: 1rem;
+    border-radius: 14px;
+    padding: 15px;
+    width: 100%;
+    border : none;
+    background-color: rgba(255,255,255,0.05);
+    box-shadow: 0 54px 55px rgba(0, 0, 0, 0.05),
+                0 -12px 30px rgba(0, 0, 0, 0.05),
+                0 4px 6px rgba(0, 0, 0, 0.05),
+                0 12px 3px rgba(0, 0, 0, 0.05),
+                0 -3px 5px rgba(0, 0, 0, 0.05);
+
+}
+
+input:focus{
+    outline: none;
+}
+#submit{
+    position: absolute;
+    right: 10px;
+    width: 34px;
+    height: 34px;
+    border: none;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.2s ease;
+}
+#submit i:hover{
+    color: #fff;
+    transform: scale(1.25);
+}
+#submit:active{
+    transform: scale(0.95);
+}
+#submit:focus-visible{
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+.info{
+    padding:0.5rem;
+    color:#b4b4b4;
+    font-size: 0.7rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}

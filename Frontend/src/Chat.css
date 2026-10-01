@@ -1,0 +1,188 @@
+.chats{
+    width: min(760px, calc(100% - 2rem));
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 24px 8px 18px;
+    box-sizing: border-box;
+    margin: 0 auto;
+    scrollbar-width: thin;
+    scrollbar-color: #555 transparent;
+}
+
+.chats::-webkit-scrollbar {
+    width: 8px;
+}
+
+.chats::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.chats::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 10px;
+}
+
+.userDiv {
+    display: flex;
+    justify-content: flex-end;
+    min-width: 0;
+}
+
+.gptDiv {
+    width: 100%;
+    box-sizing: border-box;
+    text-align: left;
+    color: #e7e7e7;
+    font-size: 15px;
+    line-height: 1.75;
+    overflow-wrap: anywhere;
+}
+
+.userMessage {
+    box-sizing: border-box;
+    max-width: min(82%, 600px);
+    width: fit-content;
+    margin: 0;
+    padding: 12px 16px;
+    border-radius: 17px 17px 5px 17px;
+    background-color: #323232;
+    color: #f0f0f0;
+    font-size: 15px;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.gptDiv > :first-child {
+    margin-top: 0;
+}
+
+.gptDiv > :last-child {
+    margin-bottom: 0;
+}
+
+.gptDiv p {
+    margin: 0 0 14px;
+}
+
+.gptDiv h1,
+.gptDiv h2,
+.gptDiv h3,
+.gptDiv h4 {
+    margin: 22px 0 10px;
+    color: #f5f5f5;
+    font-weight: 650;
+    line-height: 1.35;
+}
+
+.gptDiv h1 { font-size: 1.55rem; }
+.gptDiv h2 { font-size: 1.3rem; }
+.gptDiv h3 { font-size: 1.1rem; }
+.gptDiv h4 { font-size: 1rem; }
+
+.gptDiv ul,
+.gptDiv ol {
+    margin: 0 0 14px;
+    padding-left: 1.5rem;
+}
+
+.gptDiv li {
+    margin: 4px 0;
+    padding-left: 3px;
+}
+
+.gptDiv li > p {
+    margin: 0;
+}
+
+.gptDiv blockquote {
+    margin: 14px 0;
+    padding: 2px 0 2px 15px;
+    border-left: 3px solid #75a99a;
+    color: #c5c5c5;
+}
+
+.gptDiv a {
+    color: #9bd1c0;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.gptDiv code:not(pre code) {
+    padding: 2px 5px;
+    border: 1px solid #3b3b3b;
+    border-radius: 4px;
+    background: #292929;
+    color: #f0c987;
+    font-size: 0.9em;
+}
+
+.gptDiv pre {
+    max-width: 100%;
+    overflow-x: auto;
+    margin: 14px 0 18px;
+    border: 1px solid #3a3a3a;
+    border-radius: 8px;
+    background: #171717;
+    white-space: pre;
+}
+
+.gptDiv pre code.hljs {
+    display: block;
+    min-width: fit-content;
+    padding: 15px 17px;
+    border-radius: 8px;
+    background: transparent;
+    font-size: 13px;
+    line-height: 1.6;
+    tab-size: 4;
+}
+
+.gptDiv table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    margin: 14px 0 18px;
+    border-collapse: collapse;
+    white-space: nowrap;
+}
+
+.gptDiv th,
+.gptDiv td {
+    padding: 8px 12px;
+    border: 1px solid #484848;
+    text-align: left;
+}
+
+.gptDiv th {
+    background: #303030;
+    color: #f5f5f5;
+}
+
+.gptDiv hr {
+    margin: 20px 0;
+    border: 0;
+    border-top: 1px solid #414141;
+}
+
+@media (max-width: 640px) {
+    .chats {
+        width: calc(100% - 1rem);
+        gap: 14px;
+        padding: 16px 4px;
+    }
+
+    .gptDiv {
+        font-size: 14px;
+    }
+
+    .userMessage {
+        max-width: 90%;
+        font-size: 14px;
+    }
+}
