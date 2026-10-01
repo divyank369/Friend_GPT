@@ -49,3 +49,5 @@ Set the API health check path to `/health`. Configure these API environment vari
 For separate Render hostnames, the session cookie defaults to `SameSite=None; Secure`. `SESSION_COOKIE_SAME_SITE` can be set to `lax` when the frontend and API share a site. Add the production static-site origin to the Google OAuth client's authorized JavaScript origins; this credential-based flow does not use a redirect URI. Redeploy the frontend after changing any `VITE_` values because Vite embeds them at build time.
 
 The current checkout also lacks the `.env.example` templates; create local env files using the variable lists above. Neither env file should be committed.
+
+The earlier committed Render Blueprint selected Render's free plan. If you restore or recreate that Blueprint, review Render's current free-instance limits before provisioning.
