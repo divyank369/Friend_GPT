@@ -2,6 +2,7 @@ services:
   - type: web
     name: friendgpt-api
     runtime: node
+    plan: free
     rootDir: Backend
     buildCommand: npm ci
     startCommand: npm start
