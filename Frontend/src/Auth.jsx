@@ -68,7 +68,7 @@ function Auth({ onAuthenticated, googleEnabled }) {
                 <div className="auth-brand-mark" aria-hidden="true">
                     <i className="fa-solid fa-comment-dots"></i>
                 </div>
-                <p className="auth-eyebrow">FriendGPT</p>
+                <p className="auth-eyebrow">SigmaGPT</p>
                 <h1 id="auth-title">{isSignup ? "Create your account" : "Welcome back"}</h1>
                 <p className="auth-intro">
                     {isSignup ? "Your conversations, kept in one place." : "Sign in to continue your conversations."}
@@ -80,6 +80,7 @@ function Auth({ onAuthenticated, googleEnabled }) {
                             Name
                             <input
                                 autoComplete="name"
+                                minLength={2}
                                 maxLength={80}
                                 onChange={(event) => setName(event.target.value)}
                                 required
@@ -91,6 +92,7 @@ function Auth({ onAuthenticated, googleEnabled }) {
                         Email
                         <input
                             autoComplete="email"
+                            maxLength={254}
                             onChange={(event) => setEmail(event.target.value)}
                             required
                             type="email"
@@ -102,6 +104,7 @@ function Auth({ onAuthenticated, googleEnabled }) {
                         <input
                             autoComplete={isSignup ? "new-password" : "current-password"}
                             minLength={isSignup ? 8 : undefined}
+                            maxLength={128}
                             onChange={(event) => setPassword(event.target.value)}
                             required
                             type="password"
@@ -128,7 +131,7 @@ function Auth({ onAuthenticated, googleEnabled }) {
                 </div>
 
                 <p className="auth-switch">
-                    {isSignup ? "Already have an account?" : "New to FriendGPT?"}
+                    {isSignup ? "Already have an account?" : "New to SigmaGPT?"}
                     <button
                         onClick={() => {
                             setMode(isSignup ? "login" : "signup");

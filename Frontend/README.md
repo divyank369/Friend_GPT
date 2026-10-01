@@ -1,34 +1,51 @@
-# React + Vite
+# SigmaGPT
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+SigmaGPT is a React/Vite chat client and Express API backed by MongoDB. The API verifies email/password sessions and Google ID tokens; chat history is stored per authenticated user.
 
-Currently, two official plugins are available:
+## Local setup
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Create `Backend/.env` with these values:
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
-
-## Authentication setup
-
-Copy `Backend/.env.example` to `Backend/.env` and `Frontend/.env.example` to `Frontend/.env`. Set `MONGODB_URI`, `GROQ_API_KEY`, and a strong random `AUTH_JWT_SECRET` in the backend file. Generate a secret with:
-
-```sh
-node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```dotenv
+MONGODB_URI=mongodb://127.0.0.1:27017/sigmagpt
+GROQ_API_KEY=your-groq-api-key
+AUTH_JWT_SECRET=generate-a-long-random-secret
+GOOGLE_CLIENT_ID=your-google-web-client-id
+FRONTEND_ORIGIN=http://localhost:5173
 ```
 
-For Google sign-in, create a Web OAuth client in Google Cloud Console and add `http://localhost:5173` as an authorized JavaScript origin. Put the same client ID in `GOOGLE_CLIENT_ID` and `VITE_GOOGLE_CLIENT_ID`. The client ID is public; do not put a Google client secret in the frontend.
+Create `Frontend/.env`:
 
-Start the backend from `Backend` with `npm run dev`, then start Vite from `Frontend` with `npm run dev`. New accounts receive their own private thread history; older threads created before authentication are not assigned to an account automatically.
+```dotenv
+VITE_API_URL=http://localhost:8080
+VITE_GOOGLE_CLIENT_ID=your-google-web-client-id
+```
 
-## Deploying to Render
+Generate a session secret with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`. The Google client ID is public; never place a Google client secret or AI key in the frontend. Add `http://localhost:5173` as an authorized JavaScript origin in Google Cloud Console.
 
-The repository root contains `render.yaml` for the API web service and frontend static site. Push the repository to GitHub, create a new Blueprint in Render, and select that repository. Provide `MONGODB_URI`, `GROQ_API_KEY`, `GOOGLE_CLIENT_ID`, and `FRONTEND_ORIGIN` when prompted. Use MongoDB Atlas or another reachable MongoDB instance; Render does not provide MongoDB. Set `FRONTEND_ORIGIN` to the deployed static site's exact `https://...onrender.com` URL. Use the same Google OAuth client ID for both prompts, and add the deployed frontend URL as an authorized JavaScript origin in Google Cloud Console.
+Run the backend and frontend in separate terminals:
 
-The Blueprint generates `AUTH_JWT_SECRET` and wires the API URL into the frontend build. If Render assigns a different service URL than expected, update `FRONTEND_ORIGIN` in the API service and redeploy it.
+```sh
+cd Backend && npm install && npm run dev
+```
+
+```sh
+cd Frontend && npm install && npm run dev
+```
+
+New accounts receive private thread history. Older pre-authentication threads are not assigned to accounts automatically.
+
+## Render deployment
+
+The current checkout has no `render.yaml`, so create two Render services manually:
+
+| Service | Root directory | Build command | Start/publish |
+| --- | --- | --- | --- |
+| API Web Service | `Backend` | `npm ci` | `npm start` |
+| Static Site | `Frontend` | `npm ci && npm run build` | Publish `dist` |
+
+Set the API health check path to `/health`. Configure these API environment variables: `NODE_ENV=production`, `MONGODB_URI` (a reachable MongoDB Atlas URI), `GROQ_API_KEY`, `AUTH_JWT_SECRET` (a strong random value), `FRONTEND_ORIGIN` (the exact static-site origin, including `https://` and no trailing slash), and `GOOGLE_CLIENT_ID` if Google sign-in is enabled. Optional API settings are `GROQ_MODEL`, `GROQ_API_URL`, and `SESSION_COOKIE_SAME_SITE=lax` when the services share a site. Set `VITE_API_URL` to the API's public Render URL and `VITE_GOOGLE_CLIENT_ID` to the same Google client ID when building the static site.
+
+For separate Render hostnames, the session cookie defaults to `SameSite=None; Secure`. `SESSION_COOKIE_SAME_SITE` can be set to `lax` when the frontend and API share a site. Add the production static-site origin to the Google OAuth client's authorized JavaScript origins; this credential-based flow does not use a redirect URI. Redeploy the frontend after changing any `VITE_` values because Vite embeds them at build time.
+
+The current checkout also lacks the `.env.example` templates; create local env files using the variable lists above. Neither env file should be committed.

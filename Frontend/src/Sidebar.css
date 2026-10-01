@@ -13,13 +13,18 @@
     color: #ececec;
 }
 
-.sidebar > button {
-    width: calc(100% - 12px);
+.sidebar-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 6px 24px;
+}
+
+.sidebar-header > button {
     min-height: 46px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin: 0 6px 24px;
     padding: 7px 9px;
     border: 1px solid #3b3b3b;
     border-radius: 8px;
@@ -29,13 +34,13 @@
     transition: background-color 150ms ease, border-color 150ms ease;
 }
 
-.sidebar > button:hover,
-.sidebar > button:focus-visible {
+.sidebar-header > button:hover,
+.sidebar-header > button:focus-visible {
     border-color: #555;
     background-color: var(--sidebar-hover);
 }
 
-.sidebar > button:focus-visible {
+.sidebar-header > button:focus-visible {
     outline: 2px solid #a3c7ff;
     outline-offset: 2px;
 }
@@ -50,7 +55,12 @@
     object-fit: contain;
 }
 
-.sidebar > button span {
+.newchat {
+    min-width: 0;
+    flex: 1;
+}
+
+.newchat span {
     width: 34px;
     height: 34px;
     display: grid;
@@ -89,17 +99,33 @@
     overflow: hidden;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 0;
     margin: 2px 0;
-    padding: 10px;
     border-radius: 7px;
     color: #d4d4d8;
     font-size: 13px;
     line-height: 1.3;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    cursor: pointer;
     transition: background-color 140ms ease;
+}
+
+.thread-select {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    padding: 10px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+}
+
+.thread-select:focus-visible {
+    outline: 2px solid #a3c7ff;
+    outline-offset: -2px;
 }
 
 .thread-title {
@@ -108,6 +134,14 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.history-message {
+    padding: 10px;
+    color: var(--sidebar-muted);
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
 }
 
 .delete-thread {
@@ -148,15 +182,22 @@
     background-color: var(--sidebar-hover);
 }
 
+.history li:hover .thread-select {
+    color: #fff;
+}
+
 .history li.active {
     background-color: #303532;
     box-shadow: inset 2px 0 #a8c9bf;
-    color: #fff;
-    font-weight: 600;
 }
 
 .history li.active:hover {
     background-color: #383e3a;
+}
+
+.history li.active .thread-select {
+    color: #fff;
+    font-weight: 600;
 }
 
 .sign {
@@ -168,31 +209,63 @@
 }
 
 .sign p {
-    display: flex;
-    align-items: center;
-    gap: 10px;
     margin: 0;
     color: #ededed;
     font-size: 12px;
 }
 
-.sign p::before {
-    width: 31px;
-    height: 31px;
-    display: grid;
-    flex: 0 0 auto;
-    place-items: center;
-    border-radius: 50%;
-    background-color: #3f6658;
-    color: #f3fff9;
-    content: "MB";
-    font-size: 10px;
-    font-weight: 700;
+.sidebar-backdrop {
+    display: none;
 }
 
 @media (max-width: 640px) {
     .sidebar {
-        width: 220px;
-        flex-basis: 220px;
+        position: fixed;
+        z-index: 31;
+        inset: 0 auto 0 0;
+        width: min(82vw, 280px);
+        height: 100dvh;
+        flex-basis: auto;
+        transform: translateX(-100%);
+        transition: transform 180ms ease;
+    }
+
+    .sidebar.sidebar-open {
+        transform: translateX(0);
+    }
+
+    .sidebar-backdrop {
+        position: fixed;
+        z-index: 30;
+        inset: 0;
+        display: block;
+        border: 0;
+        background: rgba(0, 0, 0, 0.58);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sidebar {
+        transition: none;
+    }
+}
+
+.sidebar-close {
+    width: 36px;
+    flex: 0 0 36px;
+    justify-content: center;
+    border: 0 !important;
+    background: transparent !important;
+    color: #c9c9c9 !important;
+}
+
+.sidebar-close:hover,
+.sidebar-close:focus-visible {
+    background: var(--sidebar-hover) !important;
+}
+
+@media (min-width: 641px) {
+    .sidebar-close {
+        display: none !important;
     }
 }

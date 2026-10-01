@@ -2,6 +2,9 @@
   "name": "frontend",
   "private": true,
   "version": "0.0.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -17,7 +20,6 @@
     "react-spinners": "^0.17.1",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
-    "remark-rehype": "^11.1.2",
     "uuid": "^14.0.2"
   },
   "devDependencies": {

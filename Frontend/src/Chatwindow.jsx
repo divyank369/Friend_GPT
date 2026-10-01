@@ -11,18 +11,25 @@ function Chatwindow() {
         setUser,
         prompt,
         setPrompt,
-        setReply,
         setNewChat,
         currThreadId,
         setPrevChats,
-        setAllThreads
+        setAllThreads,
+        setSidebarOpen
     } = useContext(MyContext);
 
     const [loading, setLoading] = useState(false);
+    const [requestError, setRequestError] = useState(null);
     const [accountMenuOpen, setAccountMenuOpen] = useState(false);
     const [activeAccountDialog, setActiveAccountDialog] = useState(null);
     const [sendOnEnter, setSendOnEnter] = useState(() => localStorage.getItem("friendgpt-send-on-enter") !== "false");
     const accountMenuRef = useRef(null);
+    const requestInFlight = useRef(false);
+    const activeThreadId = useRef(currThreadId);
+
+    useEffect(() => {
+        activeThreadId.current = currThreadId;
+    }, [currThreadId]);
 
     useEffect(() => {
         const closeOnOutsideClick = (event) => {
@@ -46,19 +53,16 @@ function Chatwindow() {
     }, []);
 
     const getReply = async () => {
-        if (!prompt.trim() || loading) return;
+        if (!prompt.trim() || requestInFlight.current) return;
 
-        const currentPrompt = prompt;
+        const currentPrompt = prompt.trim();
+        const requestThreadId = currThreadId;
 
+        requestInFlight.current = true;
         setLoading(true);
         setNewChat(false);
-
-        console.log(
-            "message",
-            currentPrompt,
-            "threadId",
-            currThreadId
-        );
+        setRequestError(null);
+        setPrevChats((chats) => [...chats, { role: "user", content: currentPrompt }]);
 
         const options = {
             method: "POST",
@@ -67,40 +71,44 @@ function Chatwindow() {
             },
             body: JSON.stringify({
                 message: currentPrompt,
-                threadId: currThreadId
+                threadId: requestThreadId
             })
         };
 
         try {
             const response = await apiFetch("/api/chat", options);
+            const result = await response.json().catch(() => null);
+            if (!response.ok) throw new Error(result?.error || "Could not send your message");
+            if (typeof result?.reply !== "string" || !result.reply.trim()) {
+                throw new Error("The AI service returned an empty response");
+            }
+            if (activeThreadId.current !== requestThreadId) return;
 
-            const res = await response.json();
-
-            console.log(res);
-
-            const assistantReply = res.reply;
-
-            // Add user message and AI response only once
-            setPrevChats((prevChats) => [
-                ...prevChats,
-                {
-                    role: "user",
-                    content: currentPrompt
-                },
-                {
-                    role: "assistant",
-                    content: assistantReply
-                }
-            ]);
-
-            setReply(assistantReply);
-
-            // Clear input
+            setPrevChats((chats) => [...chats, { role: "assistant", content: result.reply }]);
+            setAllThreads((threads) => {
+                const existing = threads.find((thread) => thread.threadId === requestThreadId);
+                const title = existing?.title || currentPrompt.replace(/\s+/g, " ").slice(0, 120);
+                return [
+                    { threadId: requestThreadId, title },
+                    ...threads.filter((thread) => thread.threadId !== requestThreadId)
+                ];
+            });
             setPrompt("");
-
         } catch (err) {
-            console.log(err);
+            if (activeThreadId.current === requestThreadId) {
+                setPrevChats((chats) => {
+                    const lastChat = chats[chats.length - 1];
+                    return lastChat?.role === "user" && lastChat.content === currentPrompt
+                        ? chats.slice(0, -1)
+                        : chats;
+                });
+                setRequestError({
+                    threadId: requestThreadId,
+                    message: err.message || "Could not send your message. Please try again."
+                });
+            }
         } finally {
+            requestInFlight.current = false;
             setLoading(false);
         }
     };
@@ -111,8 +119,8 @@ function Chatwindow() {
             if (!response.ok) throw new Error("Could not sign out");
             setPrevChats([]);
             setAllThreads([]);
-            setReply(null);
             setPrompt("");
+            setSidebarOpen(false);
             setUser(null);
         } catch (err) {
             console.error(err);
@@ -121,8 +129,8 @@ function Chatwindow() {
         }
     };
 
-    const openAccountDialog = (dialog) => {
-        setActiveAccountDialog(dialog);
+    const openAccountDialog = () => {
+        setActiveAccountDialog("settings");
         setAccountMenuOpen(false);
     };
 
@@ -136,8 +144,16 @@ function Chatwindow() {
         <div className="chatWindow">
 
             <div className="navbar">
+                <button
+                    aria-label="Open conversation history"
+                    className="history-toggle"
+                    onClick={() => setSidebarOpen(true)}
+                    type="button"
+                >
+                    <i className="fa-solid fa-bars" aria-hidden="true"></i>
+                </button>
                 <span>
-                    FriendGpt &nbsp;
+                    SigmaGPT &nbsp;
                     <i className="fa-solid fa-angle-down"></i>
                 </span>
 
@@ -162,13 +178,9 @@ function Chatwindow() {
                                 <strong>{user?.name}</strong>
                                 <span>{user?.email}</span>
                             </div>
-                            <button onClick={() => openAccountDialog("settings")} role="menuitem" type="button">
+                            <button onClick={openAccountDialog} role="menuitem" type="button">
                                 <i className="fa-solid fa-gear" aria-hidden="true"></i>
                                 Settings
-                            </button>
-                            <button onClick={() => openAccountDialog("upgrade")} role="menuitem" type="button">
-                                <i className="fa-solid fa-arrow-up-right-dots" aria-hidden="true"></i>
-                                Upgrade plan
                             </button>
                             <button onClick={signOut} role="menuitem" type="button">
                                 <i className="fa-solid fa-arrow-right-from-bracket" aria-hidden="true"></i>
@@ -194,10 +206,8 @@ function Chatwindow() {
                     >
                         <header className="account-dialog-header">
                             <div>
-                                <p>{activeAccountDialog === "settings" ? "PREFERENCES" : "SUBSCRIPTION"}</p>
-                                <h2 id="account-dialog-title">
-                                    {activeAccountDialog === "settings" ? "Settings" : "Upgrade your plan"}
-                                </h2>
+                                <p>PREFERENCES</p>
+                                <h2 id="account-dialog-title">Settings</h2>
                             </div>
                             <button
                                 aria-label="Close dialog"
@@ -209,42 +219,24 @@ function Chatwindow() {
                             </button>
                         </header>
 
-                        {activeAccountDialog === "settings" ? (
-                            <div className="account-dialog-content">
-                                <div className="settings-account">
-                                    <span className="settings-avatar">
-                                        {user?.name?.charAt(0).toUpperCase() || "U"}
-                                    </span>
-                                    <div>
-                                        <strong>{user?.name}</strong>
-                                        <span>{user?.email}</span>
-                                    </div>
+                        <div className="account-dialog-content">
+                            <div className="settings-account">
+                                <span className="settings-avatar">
+                                    {user?.name?.charAt(0).toUpperCase() || "U"}
+                                </span>
+                                <div>
+                                    <strong>{user?.name}</strong>
+                                    <span>{user?.email}</span>
                                 </div>
-                                <label className="settings-toggle">
-                                    <span>
-                                        <strong>Send with Enter</strong>
-                                        <small>Turn this off to prevent Enter from sending messages.</small>
-                                    </span>
-                                    <input checked={sendOnEnter} onChange={updateSendOnEnter} type="checkbox" />
-                                </label>
                             </div>
-                        ) : (
-                            <div className="account-dialog-content">
-                                <div className="plan-option">
-                                    <div>
-                                        <p>FRIENDGPT</p>
-                                        <h3>Free</h3>
-                                    </div>
-                                    <span className="current-plan">CURRENT PLAN</span>
-                                </div>
-                                <p className="billing-notice">
-                                    Paid plans and checkout aren’t connected yet. Your current conversations remain available on the free plan.
-                                </p>
-                                <button className="plan-upgrade-button" disabled type="button">
-                                    Billing setup required
-                                </button>
-                            </div>
-                        )}
+                            <label className="settings-toggle">
+                                <span>
+                                    <strong>Send with Enter</strong>
+                                    <small>Turn this off to prevent Enter from sending messages.</small>
+                                </span>
+                                <input checked={sendOnEnter} onChange={updateSendOnEnter} type="checkbox" />
+                            </label>
+                        </div>
                     </section>
                 </div>
             )}
@@ -257,35 +249,45 @@ function Chatwindow() {
             />
 
             <div className="chatInput">
+                {requestError?.threadId === currThreadId && (
+                    <p className="chat-error" role="alert">{requestError.message}</p>
+                )}
 
-                <div className="inputBox">
+                <form className="inputBox" onSubmit={(event) => { event.preventDefault(); getReply(); }}>
 
-                    <input
+                    <textarea
+                        aria-label="Message"
+                        maxLength={8000}
+                        minLength={1}
                         placeholder="Ask Anything"
+                        rows={1}
                         value={prompt}
+                        disabled={loading}
                         onChange={(e) => setPrompt(e.target.value)}
                         onKeyDown={(e) => {
-                            if (e.key === "Enter" && sendOnEnter) {
+                            if (e.key === "Enter" && sendOnEnter && !e.shiftKey) {
+                                e.preventDefault();
                                 getReply();
                             }
                         }}
                     />
 
-                    <div
+                    <button
+                        aria-label="Send message"
+                        disabled={loading || !prompt.trim()}
                         id="submit"
-                        onClick={getReply}
+                        type="submit"
                     >
                         <i
                             className="fa-solid fa-paper-plane"
                             aria-hidden="true"
                         ></i>
-                    </div>
+                    </button>
 
-                </div>
+                </form>
 
                 <p className="info">
-                    FriendGpt can make mistake.
-                    Check important info. See Cookie Preferences.
+                    SigmaGPT can make mistakes. Verify important information.
                 </p>
 
             </div>

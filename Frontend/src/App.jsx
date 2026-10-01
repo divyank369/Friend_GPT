@@ -12,11 +12,11 @@ function App() {
     const [user, setUser] = useState(null);
     const [checkingSession, setCheckingSession] = useState(true);
     const [prompt, setPrompt] = useState("");
-    const [reply, setReply] = useState(null);
     const [currThreadId, setCurrThreadId] = useState(uuidv1());
     const [prevChats, setPrevChats] = useState([]);
     const [newChat, setNewChat] = useState(true);
-    const[allThreads, setAllThreads] = useState([]);
+    const [allThreads, setAllThreads] = useState([]);
+    const [sidebarOpen, setSidebarOpen] = useState(false);
     const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
     useEffect(() => {
@@ -41,8 +41,6 @@ function App() {
         setUser,
         prompt,
         setPrompt,
-        reply,
-        setReply,
         currThreadId,
         setCurrThreadId,
         newChat,
@@ -50,7 +48,9 @@ function App() {
         prevChats,
         setPrevChats,
         allThreads,
-        setAllThreads
+        setAllThreads,
+        sidebarOpen,
+        setSidebarOpen
     };
 
     let content;
@@ -63,6 +63,13 @@ function App() {
             <div className="app">
                 <MyContext.Provider value={providerValue}>
                     <Sidebar />
+                    {sidebarOpen && (
+                        <div
+                            aria-hidden="true"
+                            className="sidebar-backdrop"
+                            onClick={() => setSidebarOpen(false)}
+                        />
+                    )}
                     <Chatwindow />
                 </MyContext.Provider>
             </div>

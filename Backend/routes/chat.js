@@ -1,36 +1,20 @@
 import express from "express";
 import Thread from "../models/Thread.js"; 
-import getOpenAIResponse from "../utils/openai.js"; 
+import getGroqResponse from "../utils/openai.js";
 import requireAuth from "../middleware/requireAuth.js";
 
-const  router = express.Router();
+const router = express.Router();
 router.use(requireAuth);
-
-router.post("/test", async (req, res) => {
-        try{
-            const thread = new Thread({
-            ownerId: req.user.userId,
-                threadId: "xyz5",
-                title: "new thread bbn creeeeeation from code ",
-            });
-           const response = await thread.save();
-           res.send(response);
-        }catch(err){
-            console.error(err);
-            res.status(500).json("Error creating thread");
-        }
-    })
 
     router.get("/thread", async (req, res) => {
         try{
-            const threads = await Thread.find({ ownerId: req.user.userId }).sort({ updatedAt: -1 });
-
-
-            // we want threads in the descending order of updatedAt
-            res.json(threads);
+      const threads = await Thread.find({ ownerId: req.user.userId })
+        .select("threadId title updatedAt")
+        .sort({ updatedAt: -1 });
+      return res.json(threads);
         }catch(err){
-            console.error(err);
-            res.status(500).json("Error fetching threads");
+      console.error("Thread list error:", err);
+      return res.status(500).json({ error: "Could not fetch conversations" });
         }
     });
     router.get("/thread/:threadId", async (req, res) => {
@@ -40,10 +24,10 @@ router.post("/test", async (req, res) => {
             if(!thread){
                 return res.status(404).json("Thread not found");
             }
-            res.json(thread.messages);
+            return res.json(thread.messages);
         }catch(err){
-            console.error(err);
-            res.status(500).json("Error fetching thread");
+            console.error("Thread fetch error:", err);
+            return res.status(500).json({ error: "Could not fetch conversation" });
         }
     });
     router.delete("/thread/:threadId", async (req, res) => {
@@ -53,10 +37,10 @@ router.post("/test", async (req, res) => {
             if(!thread){
                 return res.status(404).json("Thread not found");
             }
-            res.json("Thread deleted successfully");
+            return res.json({ message: "Conversation deleted" });
         }catch(err){
-            console.error(err);
-            res.status(500).json("Error deleting thread");
+            console.error("Thread delete error:", err);
+            return res.status(500).json({ error: "Could not delete conversation" });
         }
 
     });
@@ -64,8 +48,11 @@ router.post("/test", async (req, res) => {
 router.post("/chat", async (req, res) => {
   const { threadId, message } = req.body || {};
 
-  if (!threadId || !message || typeof message !== "string" || !message.trim()) {
-    return res.status(400).json({ error: "threadId and message are required" });
+  if (
+    typeof threadId !== "string" || !threadId.trim() || threadId.length > 128 ||
+    typeof message !== "string" || !message.trim() || message.length > 8000
+  ) {
+    return res.status(400).json({ error: "Provide a valid conversation ID and a message under 8,000 characters" });
   }
 
   try {
@@ -78,20 +65,27 @@ router.post("/chat", async (req, res) => {
       thread = new Thread({
         ownerId: req.user.userId,
         threadId,
-        title: message,
-        messages: [{ role: "user", content: message }]
+        title: message.trim().replace(/\s+/g, " ").slice(0, 120)
       });
-    } else {
-      thread.messages = Array.isArray(thread.messages) ? thread.messages : [];
-      thread.messages.push({ role: "user", content: message });
     }
 
-    const assistantReply = await getOpenAIResponse(message);
+    const modelMessages = [];
+    let remainingCharacters = 24000;
+    const conversation = [...(thread.messages || []), { role: "user", content: message.trim() }];
+    for (const entry of conversation.slice(-20).reverse()) {
+      if (remainingCharacters <= 0) break;
+      const content = entry.content.slice(-remainingCharacters);
+      modelMessages.unshift({ role: entry.role, content });
+      remainingCharacters -= content.length;
+    }
+
+    const assistantReply = await getGroqResponse(modelMessages);
 
     if (typeof assistantReply !== "string" || !assistantReply.trim()) {
       return res.status(502).json({ error: "AI provider returned an empty response" });
     }
 
+    thread.messages.push({ role: "user", content: message.trim() });
     thread.messages.push({ role: "assistant", content: assistantReply });
     thread.updatedAt = new Date();
     await thread.save();
@@ -99,7 +93,9 @@ router.post("/chat", async (req, res) => {
     return res.json({ reply: assistantReply });
   } catch (err) {
     console.error("Chat error:", err);
-    return res.status(500).json({ error: err.message || "Error processing chat" });
+    return res.status(err.statusCode || 500).json({
+      error: err.statusCode ? err.message : "Could not process your message"
+    });
   }
 });
 

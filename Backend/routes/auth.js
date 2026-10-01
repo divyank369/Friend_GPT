@@ -9,6 +9,15 @@ const router = express.Router();
 const googleClient = new OAuth2Client();
 const cookieName = "friendgpt_session";
 const sessionDurationMs = 7 * 24 * 60 * 60 * 1000;
+const cookieSameSite = process.env.SESSION_COOKIE_SAME_SITE === "lax"
+    ? "lax"
+    : process.env.NODE_ENV === "production" ? "none" : "lax";
+const sessionCookieOptions = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production" || cookieSameSite === "none",
+    sameSite: cookieSameSite,
+    path: "/"
+};
 
 function publicUser(user) {
     return {
@@ -30,10 +39,7 @@ function setSessionCookie(res, user) {
         expiresIn: "7d"
     });
     res.cookie(cookieName, token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        path: "/",
+        ...sessionCookieOptions,
         maxAge: sessionDurationMs
     });
 }
@@ -47,7 +53,7 @@ router.post("/signup", async (req, res) => {
     const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
     const password = typeof req.body?.password === "string" ? req.body.password : "";
 
-    if (name.length < 2 || name.length > 80 || !isValidEmail(email) || password.length < 8 || password.length > 128) {
+    if (name.length < 2 || name.length > 80 || email.length > 254 || !isValidEmail(email) || password.length < 8 || password.length > 128) {
         return res.status(400).json({ error: "Enter a name, valid email, and password of 8 to 128 characters" });
     }
 
@@ -79,7 +85,7 @@ router.post("/login", async (req, res) => {
     const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
     const password = typeof req.body?.password === "string" ? req.body.password : "";
 
-    if (!isValidEmail(email) || !password) {
+    if (email.length > 254 || !isValidEmail(email) || !password || password.length > 128) {
         return res.status(400).json({ error: "Enter a valid email and password" });
     }
 
@@ -102,23 +108,29 @@ router.post("/login", async (req, res) => {
 
 router.post("/google", async (req, res) => {
     const idToken = req.body?.idToken;
-    if (typeof idToken !== "string" || !idToken) {
+    if (typeof idToken !== "string" || !idToken || idToken.length > 8192) {
         return res.status(400).json({ error: "Google credential is required" });
     }
     if (!process.env.GOOGLE_CLIENT_ID || !process.env.AUTH_JWT_SECRET) {
         return res.status(503).json({ error: "Google sign-in is not configured on the server" });
     }
 
+    let payload;
     try {
         const ticket = await googleClient.verifyIdToken({
             idToken,
             audience: process.env.GOOGLE_CLIENT_ID
         });
-        const payload = ticket.getPayload();
-        if (!payload?.sub || !payload.email || payload.email_verified !== true) {
-            return res.status(401).json({ error: "Google account email could not be verified" });
-        }
+        payload = ticket.getPayload();
+    } catch {
+        return res.status(401).json({ error: "Google sign-in could not be verified" });
+    }
 
+    if (!payload?.sub || !payload.email || payload.email_verified !== true) {
+        return res.status(401).json({ error: "Google account email could not be verified" });
+    }
+
+    try {
         const email = payload.email.toLowerCase();
         let user = await User.findOne({ $or: [{ googleId: payload.sub }, { email }] });
         if (user?.googleId && user.googleId !== payload.sub) {
@@ -126,7 +138,7 @@ router.post("/google", async (req, res) => {
         }
         if (!user) {
             user = new User({
-                name: payload.name || email.split("@")[0],
+                name: (payload.name || email.split("@")[0]).slice(0, 80),
                 email,
                 googleId: payload.sub,
                 avatarUrl: payload.picture || ""
@@ -139,8 +151,11 @@ router.post("/google", async (req, res) => {
         setSessionCookie(res, user);
         return res.json({ user: publicUser(user) });
     } catch (error) {
-        console.error("Google sign-in error:", error);
-        return res.status(401).json({ error: "Google sign-in could not be verified" });
+        if (error.code === 11000) {
+            return res.status(409).json({ error: "An account with this email already exists" });
+        }
+        console.error("Google account error:", error);
+        return res.status(500).json({ error: "Could not complete Google sign-in" });
     }
 });
 
@@ -148,7 +163,7 @@ router.get("/me", requireAuth, async (req, res) => {
     try {
         const user = await User.findById(req.user.userId);
         if (!user) {
-            res.clearCookie(cookieName, { httpOnly: true, sameSite: "lax", path: "/" });
+            res.clearCookie(cookieName, sessionCookieOptions);
             return res.status(401).json({ error: "Account no longer exists" });
         }
         return res.json({ user: publicUser(user) });
@@ -160,10 +175,7 @@ router.get("/me", requireAuth, async (req, res) => {
 
 router.post("/logout", (req, res) => {
     res.clearCookie(cookieName, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        path: "/"
+        ...sessionCookieOptions
     });
     return res.json({ message: "Signed out" });
 });

@@ -1,43 +1,51 @@
 import "dotenv/config";
 
-const getOpenAIResponse = async (message) => {
-  const options = {
+class AIProviderError extends Error {
+  constructor(message, statusCode) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
+const getGroqResponse = async (messages) => {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new AIProviderError("AI service is not configured", 503);
+
+  try {
+    const response = await fetch(process.env.GROQ_API_URL || "https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+        "Authorization": `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: "openai/gpt-oss-20b",
-      messages: [
-        {
-          role: "user",
-          content: message
-        }
-      ]
-    })
-  };
+        model: process.env.GROQ_MODEL || "openai/gpt-oss-20b",
+        messages,
+        max_tokens: 2048
+      }),
+      signal: AbortSignal.timeout(30000)
+    });
 
-  try {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", options);
-    const data = await response.json();
-
+    const data = await response.json().catch(() => null);
     if (!response.ok) {
-      const apiError = data?.error?.message || "AI provider request failed";
-      throw new Error(apiError);
+      const statusCode = response.status === 429 ? 503 : 502;
+      throw new AIProviderError("AI service is temporarily unavailable", statusCode);
     }
 
     const aiText = data?.choices?.[0]?.message?.content;
 
     if (typeof aiText !== "string" || !aiText.trim()) {
-      throw new Error("AI response was empty or malformed");
+      throw new AIProviderError("AI service returned an invalid response", 502);
     }
 
     return aiText;
   } catch (err) {
-    console.error("getOpenAIResponse error:", err);
-    throw err;
+    if (err instanceof AIProviderError) throw err;
+    if (err.name === "TimeoutError" || err.name === "AbortError") {
+      throw new AIProviderError("AI service timed out. Please try again.", 504);
+    }
+    throw new AIProviderError("AI service is temporarily unavailable", 502);
   }
 };
 
-export default getOpenAIResponse;
+export default getGroqResponse;

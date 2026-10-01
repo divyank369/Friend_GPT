@@ -26,6 +26,7 @@ const userSchema = new mongoose.Schema({
     },
     avatarUrl: {
         type: String,
+        maxlength: 2048,
         default: ""
     }
 }, { timestamps: true });

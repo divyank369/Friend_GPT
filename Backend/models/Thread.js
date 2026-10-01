@@ -8,7 +8,8 @@ const messageSchema = new mongoose.Schema({
   },
   content: {
     type: String,
-    required: true
+        required: true,
+        maxlength: 16000
   },
     timestamp: {
         type: Date,
@@ -26,11 +27,13 @@ const threadSchema = new mongoose.Schema({
     threadId: {
         type: String,
         required: true,
+            maxlength: 128,
         unique: true
     },
     title:{
         type: String,
-        default: "New chat"
+                default: "New chat",
+                maxlength: 120
     },
     messages: {
         type: [messageSchema],
@@ -45,5 +48,7 @@ const threadSchema = new mongoose.Schema({
         default: Date.now
     }
 });
+
+threadSchema.index({ ownerId: 1, updatedAt: -1 });
 
 export default mongoose.model("Thread",threadSchema);
