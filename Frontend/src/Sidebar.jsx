@@ -1,5 +1,5 @@
 import "./Sidebar.css";
-import blacklogo from "./assets/blacklogo.png";
+import mylogo from "./assets/mylogo.png";
 import { useContext, useEffect, useRef, useState } from "react";
 import { MyContext } from "./Mycontext";
 import { v1 as uuidv1 } from "uuid";
@@ -102,7 +102,7 @@ function Sidebar() {
         <aside aria-label="Conversation history" className={`sidebar${sidebarOpen ? " sidebar-open" : ""}`}>
             <div className="sidebar-header">
                 <button aria-label="Start a new chat" onClick={createNewChat} className="newchat" type="button">
-                    <img src={blacklogo} alt="" className="logo" />
+                    <img src={mylogo} alt="" className="logo" />
                     <span><i className="fa-solid fa-pen-to-square" aria-hidden="true"></i></span>
                 </button>
                 <button
