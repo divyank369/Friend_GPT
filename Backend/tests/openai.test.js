@@ -33,11 +33,14 @@ test("sends conversation context and returns the assistant response", async () =
   globalThis.fetch = async (url, options) => {
     assert.equal(url, "https://api.groq.com/openai/v1/chat/completions");
     assert.equal(options.headers.Authorization, "Bearer test-key");
-    assert.deepEqual(JSON.parse(options.body), {
-      model: "openai/gpt-oss-20b",
-      messages,
-      max_tokens: 2048
-    });
+    const requestBody = JSON.parse(options.body);
+    assert.equal(requestBody.model, "openai/gpt-oss-20b");
+    assert.equal(requestBody.max_tokens, 2048);
+    assert.equal(requestBody.messages[0].role, "system");
+    assert.match(requestBody.messages[0].content, /You are SigmaGPT/);
+    assert.match(requestBody.messages[0].content, /Do not claim to be the ChatGPT application/);
+    assert.equal(requestBody.messages[0].content.includes("openai/gpt-oss-20b"), true);
+    assert.deepEqual(requestBody.messages.slice(1), messages);
     return Response.json({ choices: [{ message: { content: "A checked response." } }] });
   };
 
