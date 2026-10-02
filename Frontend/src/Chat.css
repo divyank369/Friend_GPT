@@ -43,6 +43,21 @@
     overflow-wrap: anywhere;
 }
 
+.gptDiv.is-streaming > :last-child::after {
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    margin-left: 3px;
+    background-color: currentColor;
+    content: "";
+    vertical-align: -0.15em;
+    animation: typing-caret 1s steps(2, start) infinite;
+}
+
+@keyframes typing-caret {
+    to { visibility: hidden; }
+}
+
 .userMessage {
     box-sizing: border-box;
     max-width: min(82%, 600px);

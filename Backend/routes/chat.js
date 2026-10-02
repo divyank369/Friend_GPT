@@ -79,7 +79,21 @@ router.post("/chat", async (req, res) => {
       remainingCharacters -= content.length;
     }
 
-    const assistantReply = await getGroqResponse(modelMessages);
+    let streamStarted = false;
+    const assistantReply = await getGroqResponse(modelMessages, (token) => {
+      if (res.destroyed) return;
+      if (!streamStarted) {
+        streamStarted = true;
+        res.status(200).set({
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          "Connection": "keep-alive",
+          "X-Accel-Buffering": "no"
+        });
+        res.flushHeaders();
+      }
+      res.write(`data: ${JSON.stringify({ token })}\n\n`);
+    });
 
     if (typeof assistantReply !== "string" || !assistantReply.trim()) {
       return res.status(502).json({ error: "AI provider returned an empty response" });
@@ -90,12 +104,17 @@ router.post("/chat", async (req, res) => {
     thread.updatedAt = new Date();
     await thread.save();
 
-    return res.json({ reply: assistantReply });
+    res.write("event: done\ndata: {}\n\n");
+    return res.end();
   } catch (err) {
     console.error("Chat error:", err);
-    return res.status(err.statusCode || 500).json({
-      error: err.statusCode ? err.message : "Could not process your message"
-    });
+    const statusCode = err.statusCode || 500;
+    const errorMessage = err.statusCode ? err.message : "Could not process your message";
+    if (res.headersSent) {
+      res.write(`event: error\ndata: ${JSON.stringify({ message: errorMessage })}\n\n`);
+      return res.end();
+    }
+    return res.status(statusCode).json({ error: errorMessage });
   }
 });
 

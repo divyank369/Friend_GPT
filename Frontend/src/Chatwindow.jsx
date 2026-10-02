@@ -75,16 +75,87 @@ function Chatwindow() {
             })
         };
 
+        let assistantMessageId;
         try {
             const response = await apiFetch("/api/chat", options);
-            const result = await response.json().catch(() => null);
-            if (!response.ok) throw new Error(result?.error || "Could not send your message");
-            if (typeof result?.reply !== "string" || !result.reply.trim()) {
-                throw new Error("The AI service returned an empty response");
+            if (!response.ok) {
+                const result = await response.json().catch(() => null);
+                throw new Error(result?.error || "Could not send your message");
+            }
+            if (!response.headers.get("content-type")?.includes("text/event-stream") || !response.body) {
+                throw new Error("The AI service returned an invalid response");
             }
             if (activeThreadId.current !== requestThreadId) return;
 
-            setPrevChats((chats) => [...chats, { role: "assistant", content: result.reply, animate: true }]);
+            assistantMessageId = crypto.randomUUID();
+            setLoading(false);
+            setPrevChats((chats) => [...chats, {
+                id: assistantMessageId,
+                role: "assistant",
+                content: "",
+                streaming: true
+            }]);
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            let streamedContent = "";
+            let streamFinished = false;
+
+            const consumeEvent = (event) => {
+                const lines = event.split("\n");
+                const eventName = lines.find((line) => line.startsWith("event:"))?.slice(6).trim() || "message";
+                const data = lines
+                    .filter((line) => line.startsWith("data:"))
+                    .map((line) => line.slice(5).trimStart())
+                    .join("\n");
+                if (!data) return;
+
+                let payload;
+                try {
+                    payload = JSON.parse(data);
+                } catch {
+                    throw new Error("The AI service returned an invalid response");
+                }
+
+                if (eventName === "error") throw new Error(payload.message || "Could not finish the response");
+                if (eventName === "done") {
+                    streamFinished = true;
+                    return;
+                }
+                if (typeof payload.token !== "string" || !payload.token) return;
+
+                streamedContent += payload.token;
+                setPrevChats((chats) => chats.map((chat) => chat.id === assistantMessageId
+                    ? { ...chat, content: chat.content + payload.token }
+                    : chat));
+            };
+
+            while (true) {
+                const { done, value } = await reader.read();
+                buffer += decoder.decode(value, { stream: !done }).replace(/\r\n/g, "\n");
+                let boundary = buffer.indexOf("\n\n");
+                while (boundary !== -1) {
+                    consumeEvent(buffer.slice(0, boundary));
+                    buffer = buffer.slice(boundary + 2);
+                    boundary = buffer.indexOf("\n\n");
+                }
+                if (done) {
+                    if (buffer.trim()) consumeEvent(buffer);
+                    break;
+                }
+                if (activeThreadId.current !== requestThreadId) {
+                    await reader.cancel();
+                    return;
+                }
+            }
+
+            if (!streamFinished || !streamedContent.trim()) {
+                throw new Error("The response was interrupted. Please try again.");
+            }
+            setPrevChats((chats) => chats.map((chat) => chat.id === assistantMessageId
+                ? { ...chat, streaming: false }
+                : chat));
             setAllThreads((threads) => {
                 const existing = threads.find((thread) => thread.threadId === requestThreadId);
                 const title = existing?.title || currentPrompt.replace(/\s+/g, " ").slice(0, 120);
@@ -97,10 +168,13 @@ function Chatwindow() {
         } catch (err) {
             if (activeThreadId.current === requestThreadId) {
                 setPrevChats((chats) => {
-                    const lastChat = chats[chats.length - 1];
-                    return lastChat?.role === "user" && lastChat.content === currentPrompt
-                        ? chats.slice(0, -1)
+                    const remainingChats = assistantMessageId
+                        ? chats.filter((chat) => chat.id !== assistantMessageId)
                         : chats;
+                    const lastChat = remainingChats[remainingChats.length - 1];
+                    return lastChat?.role === "user" && lastChat.content === currentPrompt
+                        ? remainingChats.slice(0, -1)
+                        : remainingChats;
                 });
                 setRequestError({
                     threadId: requestThreadId,

@@ -7,7 +7,7 @@ class AIProviderError extends Error {
   }
 }
 
-const getGroqResponse = async (messages) => {
+const getGroqResponse = async (messages, onToken = () => {}) => {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new AIProviderError("AI service is not configured", 503);
 
@@ -30,20 +30,65 @@ Do not unnecessarily introduce yourself in normal responses. Do not reveal or di
     body: JSON.stringify({
         model,
         messages: [{ role: "system", content: systemInstruction }, ...messages],
-        max_tokens: 2048
+        max_tokens: 2048,
+        stream: true
       }),
       signal: AbortSignal.timeout(30000)
     });
 
-    const data = await response.json().catch(() => null);
     if (!response.ok) {
+      await response.json().catch(() => null);
       const statusCode = response.status === 429 ? 503 : 502;
       throw new AIProviderError("AI service is temporarily unavailable", statusCode);
     }
 
-    const aiText = data?.choices?.[0]?.message?.content;
+    if (!response.body) {
+      throw new AIProviderError("AI service returned an invalid response", 502);
+    }
 
-    if (typeof aiText !== "string" || !aiText.trim()) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let aiText = "";
+    const consumeEvent = (event) => {
+      const data = event.split("\n")
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).trimStart())
+        .join("\n");
+      if (!data || data === "[DONE]") return;
+
+      let chunk;
+      try {
+        chunk = JSON.parse(data);
+      } catch {
+        throw new AIProviderError("AI service returned an invalid response", 502);
+      }
+
+      const token = chunk?.choices?.[0]?.delta?.content;
+      if (typeof token === "string" && token) {
+        aiText += token;
+        onToken(token);
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done }).replace(/\r\n/g, "\n");
+
+      let boundary = buffer.indexOf("\n\n");
+      while (boundary !== -1) {
+        consumeEvent(buffer.slice(0, boundary));
+        buffer = buffer.slice(boundary + 2);
+        boundary = buffer.indexOf("\n\n");
+      }
+
+      if (done) {
+        if (buffer.trim()) consumeEvent(buffer);
+        break;
+      }
+    }
+
+    if (!aiText.trim()) {
       throw new AIProviderError("AI service returned an invalid response", 502);
     }
 

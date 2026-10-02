@@ -8,6 +8,19 @@ const originalEnvironment = {
   model: process.env.GROQ_MODEL
 };
 const originalFetch = globalThis.fetch;
+const encoder = new TextEncoder();
+
+const streamResponse = (events, status = 200) => new Response(
+  new ReadableStream({
+    start(controller) {
+      for (const event of events) controller.enqueue(encoder.encode(event));
+      controller.close();
+    }
+  }),
+  { status, headers: { "Content-Type": "text/event-stream" } }
+);
+
+const contentEvent = (content) => `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`;
 
 beforeEach(() => {
   process.env.GROQ_API_KEY = "test-key";
@@ -25,7 +38,7 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test("sends conversation context and returns the assistant response", async () => {
+test("streams assistant response deltas while preserving conversation context", async () => {
   const messages = [
     { role: "user", content: "hello" },
     { role: "assistant", content: "hi" }
@@ -36,15 +49,24 @@ test("sends conversation context and returns the assistant response", async () =
     const requestBody = JSON.parse(options.body);
     assert.equal(requestBody.model, "openai/gpt-oss-20b");
     assert.equal(requestBody.max_tokens, 2048);
+    assert.equal(requestBody.stream, true);
     assert.equal(requestBody.messages[0].role, "system");
     assert.match(requestBody.messages[0].content, /You are SigmaGPT/);
     assert.match(requestBody.messages[0].content, /Do not claim to be the ChatGPT application/);
     assert.equal(requestBody.messages[0].content.includes("openai/gpt-oss-20b"), true);
     assert.deepEqual(requestBody.messages.slice(1), messages);
-    return Response.json({ choices: [{ message: { content: "A checked response." } }] });
+    const firstEvent = contentEvent("A checked ");
+    return streamResponse([
+      firstEvent.slice(0, 17),
+      firstEvent.slice(17),
+      contentEvent("response."),
+      "data: [DONE]\n\n"
+    ]);
   };
 
-  assert.equal(await getGroqResponse(messages), "A checked response.");
+  const tokens = [];
+  assert.equal(await getGroqResponse(messages, (token) => tokens.push(token)), "A checked response.");
+  assert.deepEqual(tokens, ["A checked ", "response."]);
 });
 
 test("maps provider rate limits without exposing provider details", async () => {
@@ -60,7 +82,7 @@ test("maps provider rate limits without exposing provider details", async () => 
 });
 
 test("rejects malformed successful responses", async () => {
-  globalThis.fetch = async () => Response.json({ choices: [] });
+  globalThis.fetch = async () => streamResponse(["data: [DONE]\n\n"]);
 
   await assert.rejects(
     getGroqResponse([{ role: "user", content: "hello" }]),
