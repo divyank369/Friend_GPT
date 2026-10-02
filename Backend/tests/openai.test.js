@@ -55,10 +55,11 @@ test("streams assistant response deltas while preserving conversation context", 
     assert.match(requestBody.messages[0].content, /Do not claim to be the ChatGPT application/);
     assert.equal(requestBody.messages[0].content.includes("openai/gpt-oss-20b"), true);
     assert.deepEqual(requestBody.messages.slice(1), messages);
-    const firstEvent = contentEvent("A checked ");
+    const firstEvent = contentEvent("A checked ").replace(/\n/g, "\r\n");
+    const lineEndingSplit = firstEvent.indexOf("\r\n") + 1;
     return streamResponse([
-      firstEvent.slice(0, 17),
-      firstEvent.slice(17),
+      firstEvent.slice(0, lineEndingSplit),
+      firstEvent.slice(lineEndingSplit),
       contentEvent("response."),
       "data: [DONE]\n\n"
     ]);

@@ -133,7 +133,8 @@ function Chatwindow() {
 
             while (true) {
                 const { done, value } = await reader.read();
-                buffer += decoder.decode(value, { stream: !done }).replace(/\r\n/g, "\n");
+                buffer += decoder.decode(value, { stream: !done });
+                buffer = buffer.replace(/\r\n/g, "\n");
                 let boundary = buffer.indexOf("\n\n");
                 while (boundary !== -1) {
                     consumeEvent(buffer.slice(0, boundary));
