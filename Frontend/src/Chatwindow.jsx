@@ -84,7 +84,7 @@ function Chatwindow() {
             }
             if (activeThreadId.current !== requestThreadId) return;
 
-            setPrevChats((chats) => [...chats, { role: "assistant", content: result.reply }]);
+            setPrevChats((chats) => [...chats, { role: "assistant", content: result.reply, animate: true }]);
             setAllThreads((threads) => {
                 const existing = threads.find((thread) => thread.threadId === requestThreadId);
                 const title = existing?.title || currentPrompt.replace(/\s+/g, " ").slice(0, 120);
