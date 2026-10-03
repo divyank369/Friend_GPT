@@ -91,6 +91,27 @@ test("rejects malformed successful responses", async () => {
   );
 });
 
+test("rejects a provider stream interrupted before its completion marker", async () => {
+  globalThis.fetch = async () => streamResponse([contentEvent("partial answer")]);
+
+  await assert.rejects(
+    getGroqResponse([{ role: "user", content: "hello" }]),
+    (error) => error.statusCode === 502 && error.message === "AI service returned an invalid response"
+  );
+});
+
+test("forwards request cancellation to the provider stream", async () => {
+  globalThis.fetch = async (_url, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
+  });
+
+  const controller = new AbortController();
+  const response = getGroqResponse([{ role: "user", content: "hello" }], undefined, controller.signal);
+  controller.abort();
+
+  await assert.rejects(response, (error) => error.name === "AbortError");
+});
+
 test("fails clearly when the provider key is missing", async () => {
   delete process.env.GROQ_API_KEY;
 

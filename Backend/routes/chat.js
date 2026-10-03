@@ -55,6 +55,12 @@ router.post("/chat", async (req, res) => {
     return res.status(400).json({ error: "Provide a valid conversation ID and a message under 8,000 characters" });
   }
 
+  const generationController = new AbortController();
+  req.once("aborted", () => generationController.abort());
+  res.once("close", () => {
+    if (!res.writableEnded) generationController.abort();
+  });
+
   try {
     let thread = await Thread.findOne({ threadId, ownerId: req.user.userId });
 
@@ -81,7 +87,7 @@ router.post("/chat", async (req, res) => {
 
     let streamStarted = false;
     const assistantReply = await getGroqResponse(modelMessages, (token) => {
-      if (res.destroyed) return;
+      if (res.destroyed || generationController.signal.aborted) return;
       if (!streamStarted) {
         streamStarted = true;
         res.status(200).set({
@@ -93,11 +99,12 @@ router.post("/chat", async (req, res) => {
         res.flushHeaders();
       }
       res.write(`data: ${JSON.stringify({ token })}\n\n`);
-    });
+    }, generationController.signal);
 
     if (typeof assistantReply !== "string" || !assistantReply.trim()) {
       return res.status(502).json({ error: "AI provider returned an empty response" });
     }
+    if (generationController.signal.aborted || res.destroyed) return;
 
     thread.messages.push({ role: "user", content: message.trim() });
     thread.messages.push({ role: "assistant", content: assistantReply });
@@ -107,6 +114,7 @@ router.post("/chat", async (req, res) => {
     res.write("event: done\ndata: {}\n\n");
     return res.end();
   } catch (err) {
+    if (generationController.signal.aborted || res.destroyed || req.aborted) return;
     console.error("Chat error:", err);
     const statusCode = err.statusCode || 500;
     const errorMessage = err.statusCode ? err.message : "Could not process your message";

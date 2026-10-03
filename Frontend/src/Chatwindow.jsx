@@ -26,9 +26,15 @@ function Chatwindow() {
     const accountMenuRef = useRef(null);
     const requestInFlight = useRef(false);
     const activeThreadId = useRef(currThreadId);
+    const activeRequest = useRef(null);
 
     useEffect(() => {
         activeThreadId.current = currThreadId;
+        return () => {
+            if (activeRequest.current?.threadId === currThreadId) {
+                activeRequest.current.controller.abort();
+            }
+        };
     }, [currThreadId]);
 
     useEffect(() => {
@@ -57,15 +63,25 @@ function Chatwindow() {
 
         const currentPrompt = prompt.trim();
         const requestThreadId = currThreadId;
+        const assistantMessageId = crypto.randomUUID();
+        const controller = new AbortController();
+        let streamReader;
+        let readerDone = false;
 
         requestInFlight.current = true;
+        activeRequest.current = { threadId: requestThreadId, controller };
         setLoading(true);
         setNewChat(false);
         setRequestError(null);
-        setPrevChats((chats) => [...chats, { role: "user", content: currentPrompt }]);
+        setPrevChats((chats) => [
+            ...chats,
+            { role: "user", content: currentPrompt },
+            { id: assistantMessageId, role: "assistant", content: "", streaming: true }
+        ]);
 
         const options = {
             method: "POST",
+            signal: controller.signal,
             headers: {
                 "Content-Type": "application/json",
             },
@@ -75,7 +91,6 @@ function Chatwindow() {
             })
         };
 
-        let assistantMessageId;
         try {
             const response = await apiFetch("/api/chat", options);
             if (!response.ok) {
@@ -87,16 +102,7 @@ function Chatwindow() {
             }
             if (activeThreadId.current !== requestThreadId) return;
 
-            assistantMessageId = crypto.randomUUID();
-            setLoading(false);
-            setPrevChats((chats) => [...chats, {
-                id: assistantMessageId,
-                role: "assistant",
-                content: "",
-                streaming: true
-            }]);
-
-            const reader = response.body.getReader();
+            streamReader = response.body.getReader();
             const decoder = new TextDecoder();
             let buffer = "";
             let streamedContent = "";
@@ -132,7 +138,8 @@ function Chatwindow() {
             };
 
             while (true) {
-                const { done, value } = await reader.read();
+                const { done, value } = await streamReader.read();
+                if (done) readerDone = true;
                 buffer += decoder.decode(value, { stream: !done });
                 buffer = buffer.replace(/\r\n/g, "\n");
                 let boundary = buffer.indexOf("\n\n");
@@ -146,7 +153,7 @@ function Chatwindow() {
                     break;
                 }
                 if (activeThreadId.current !== requestThreadId) {
-                    await reader.cancel();
+                    await streamReader.cancel();
                     return;
                 }
             }
@@ -183,6 +190,11 @@ function Chatwindow() {
                 });
             }
         } finally {
+            if (streamReader) {
+                if (!readerDone) await streamReader.cancel().catch(() => {});
+                streamReader.releaseLock();
+            }
+            if (activeRequest.current?.controller === controller) activeRequest.current = null;
             requestInFlight.current = false;
             setLoading(false);
         }
