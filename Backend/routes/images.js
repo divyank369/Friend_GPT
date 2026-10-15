@@ -3,26 +3,19 @@ import mongoose from "mongoose";
 import { GridFSBucket, ObjectId } from "mongodb";
 import multer from "multer";
 import requireAuth from "../middleware/requireAuth.js";
+import { detectUploadType, isAllowedUploadMime, supportedUploadTypes } from "../utils/uploadTypes.js";
 
 const router = express.Router();
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const allowedTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_IMAGE_BYTES, files: 1 },
-  fileFilter: (_req, file, callback) => callback(null, allowedTypes.has(file.mimetype))
+  limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 },
+  fileFilter: (_req, file, callback) => callback(null, isAllowedUploadMime(file.mimetype, file.originalname))
 });
 
 // Reuse MongoDB GridFS so uploaded and generated images stay out of thread documents.
 function imageBucket() {
   return new GridFSBucket(mongoose.connection.db, { bucketName: "images" });
-}
-
-function detectImageType(buffer) {
-  if (buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return "image/png";
-  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "image/jpeg";
-  if (buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "WEBP") return "image/webp";
-  return null;
 }
 
 // Save bytes with ownership metadata; all reads below enforce that owner.
@@ -66,20 +59,22 @@ router.post("/upload", (req, res, next) => {
   upload.single("image")(req, res, (error) => {
     if (error) {
       const status = error.code === "LIMIT_FILE_SIZE" ? 413 : 400;
-      return res.status(status).json({ error: status === 413 ? "Images must be 5 MB or smaller" : "Upload one PNG, JPEG, or WebP image" });
+      return res.status(status).json({ error: status === 413 ? "Files must be 5 MB or smaller" : "Upload one PNG, JPEG, WebP image, or PDF" });
     }
     return next();
   });
 }, async (req, res) => {
-  if (!req.file || !allowedTypes.has(req.file.mimetype) || detectImageType(req.file.buffer) !== req.file.mimetype) {
-    return res.status(400).json({ error: "Upload a valid PNG, JPEG, or WebP image" });
+  const detectedType = req.file ? detectUploadType(req.file.buffer) : null;
+  const genericPdfMime = detectedType === "application/pdf" && ["", "application/octet-stream"].includes(req.file?.mimetype);
+  if (!req.file || !supportedUploadTypes.has(detectedType) || !isAllowedUploadMime(req.file.mimetype, req.file.originalname) || (req.file.mimetype !== detectedType && !genericPdfMime)) {
+    return res.status(400).json({ error: "Upload a valid PNG, JPEG, WebP image, or PDF" });
   }
   try {
-    const fileId = await saveImage(req.file.buffer, req.file.mimetype, req.file.originalname || "image", req.user.userId);
+    const fileId = await saveImage(req.file.buffer, detectedType, req.file.originalname || "attachment", req.user.userId);
     return res.status(201).json({
       fileId: String(fileId),
-      filename: (req.file.originalname || "image").slice(0, 255),
-      contentType: req.file.mimetype,
+      filename: (req.file.originalname || "attachment").slice(0, 255),
+      contentType: detectedType,
       url: `/api/images/${fileId}`
     });
   } catch (error) {
@@ -123,7 +118,7 @@ router.post("/generate", async (req, res) => {
       return res.status(502).json({ error: "Image generation is temporarily unavailable" });
     }
     const bytes = Buffer.from(result.data[0].b64_json, "base64");
-    if (bytes.length > 20 * 1024 * 1024 || detectImageType(bytes) !== "image/png") {
+    if (bytes.length > 20 * 1024 * 1024 || detectUploadType(bytes) !== "image/png") {
       return res.status(502).json({ error: "Image provider returned an invalid image" });
     }
     const fileId = await saveImage(bytes, "image/png", "generated-image.png", req.user.userId, true);
@@ -135,21 +130,26 @@ router.post("/generate", async (req, res) => {
   }
 });
 
-// Stream images only after verifying the GridFS record belongs to this session.
+// Stream private attachments only after verifying the GridFS record belongs to this session.
 router.get("/:fileId", async (req, res) => {
   if (!ObjectId.isValid(req.params.fileId)) return res.status(404).json({ error: "Image not found" });
   const fileId = new ObjectId(req.params.fileId);
   try {
     const file = await mongoose.connection.db.collection("images.files").findOne({ _id: fileId, "metadata.ownerId": String(req.user.userId) });
     const contentType = file?.metadata?.contentType;
-    if (!file || !allowedTypes.has(contentType)) return res.status(404).json({ error: "Image not found" });
-    res.set({
+    if (!file || !supportedUploadTypes.has(contentType)) return res.status(404).json({ error: "Attachment not found" });
+    const headers = {
       "Content-Type": contentType,
       "Content-Length": String(file.length),
       "Cache-Control": "private, max-age=3600",
       "X-Content-Type-Options": "nosniff",
       "Content-Security-Policy": "default-src 'none'; sandbox"
-    });
+    };
+    if (contentType === "application/pdf") {
+      const filename = String(file.filename || "attachment.pdf").replace(/[^\w .()-]/g, "_").slice(0, 180) || "attachment.pdf";
+      headers["Content-Disposition"] = `attachment; filename="${filename}"`;
+    }
+    res.set(headers);
     return imageBucket().openDownloadStream(fileId).on("error", (error) => {
       console.error("Image stream error:", error);
       if (!res.headersSent) res.status(500).end();

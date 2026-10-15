@@ -51,6 +51,43 @@
     border: 1px solid #444;
     border-radius: 10px;
 }
+.message-pdf-attachment {
+    min-width: 0;
+    max-width: min(100%, 360px);
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 10px 12px;
+    border: 1px solid #484848;
+    border-radius: 10px;
+    background: #303030;
+    color: #f0f0f0;
+    text-align: left;
+    text-decoration: none;
+}
+.message-pdf-attachment:hover,
+.message-pdf-attachment:focus-visible {
+    border-color: #75a99a;
+    background: #373737;
+}
+.message-pdf-attachment > i {
+    flex: 0 0 auto;
+    color: #e67b78;
+    font-size: 22px;
+}
+.message-pdf-attachment > span {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+}
+.message-pdf-attachment strong,
+.message-pdf-attachment small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.message-pdf-attachment strong { font-size: 13px; }
+.message-pdf-attachment small { color: #aaa; font-size: 11px; }
 
 .gptDiv {
     width: 100%;

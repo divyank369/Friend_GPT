@@ -185,7 +185,7 @@ router.patch("/profile", requireAuth, async (req, res) => {
         const user = await User.findByIdAndUpdate(
             req.user.userId,
             { $set: { preferredName } },
-            { new: true, runValidators: true }
+            { returnDocument: "after", runValidators: true }
         );
         if (!user) return res.status(404).json({ error: "Account no longer exists" });
         return res.json({ user: publicUser(user) });

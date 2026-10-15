@@ -28,6 +28,7 @@
     "jsonwebtoken": "^9.0.3",
     "mongodb": "^7.7.0",
     "mongoose": "^9.10.2",
-    "multer": "^2.4.0"
+    "multer": "^2.4.0",
+    "pdfjs-dist": "^5.4.624"
   }
 }

@@ -48,13 +48,13 @@ test("streams assistant response deltas while preserving conversation context", 
     assert.equal(options.headers.Authorization, "Bearer test-key");
     const requestBody = JSON.parse(options.body);
     assert.equal(requestBody.model, "openai/gpt-oss-20b");
-    assert.equal(requestBody.max_tokens, 2048);
+    assert.equal(requestBody.max_completion_tokens, 2048);
     assert.equal(requestBody.stream, true);
     assert.equal(requestBody.messages[0].role, "system");
     assert.match(requestBody.messages[0].content, /You are SigmaGPT/);
     assert.match(requestBody.messages[0].content, /Do not claim to be the ChatGPT application/);
     assert.equal(requestBody.messages[0].content.includes("openai/gpt-oss-20b"), true);
-    assert.deepEqual(requestBody.messages.slice(1), messages);
+    assert.deepEqual(requestBody.messages.slice(-messages.length), messages);
     const firstEvent = contentEvent("A checked ").replace(/\n/g, "\r\n");
     const lineEndingSplit = firstEvent.indexOf("\r\n") + 1;
     return streamResponse([
@@ -68,6 +68,64 @@ test("streams assistant response deltas while preserving conversation context", 
   const tokens = [];
   assert.equal(await getGroqResponse(messages, (token) => tokens.push(token)), "A checked response.");
   assert.deepEqual(tokens, ["A checked ", "response."]);
+});
+
+test("enables Groq live search and code tools for supported text requests", async () => {
+  const answer = "The current value is 42. Sources: [Example](https://example.com).";
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, "https://api.groq.com/openai/v1/chat/completions");
+    const requestBody = JSON.parse(options.body);
+    assert.equal(requestBody.model, "openai/gpt-oss-20b");
+    assert.equal(requestBody.stream, false);
+    assert.equal(requestBody.tool_choice, "auto");
+    assert.deepEqual(requestBody.tools, [
+      { type: "browser_search" },
+      { type: "code_interpreter" }
+    ]);
+    return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: answer } }] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  };
+
+  const tokens = [];
+  const result = await getGroqResponse(
+    [{ role: "user", content: "What is the current value?" }],
+    (token) => tokens.push(token),
+    undefined,
+    [],
+    "",
+    { allowLiveTools: true, requestId: "test-request" }
+  );
+  assert.equal(result, answer);
+  assert.deepEqual(tokens, [answer]);
+});
+
+test("keeps image requests on the streaming vision model without built-in text tools", async () => {
+  globalThis.fetch = async (_url, options) => {
+    const requestBody = JSON.parse(options.body);
+    assert.equal(requestBody.model, "qwen/qwen3.8-27b");
+    assert.equal(requestBody.stream, true);
+    assert.equal("tools" in requestBody, false);
+    return streamResponse([contentEvent("A red car."), "data: [DONE]\n\n"]);
+  };
+
+  const imageMessage = {
+    role: "user",
+    content: [
+      { type: "text", text: "Describe this image." },
+      { type: "image_url", image_url: { url: "data:image/png;base64,dGVzdA==" } }
+    ]
+  };
+  const result = await getGroqResponse(
+    [imageMessage],
+    undefined,
+    undefined,
+    [],
+    "",
+    { allowLiveTools: true, requestId: "vision-request" }
+  );
+  assert.equal(result, "A red car.");
 });
 
 test("maps provider rate limits without exposing provider details", async () => {

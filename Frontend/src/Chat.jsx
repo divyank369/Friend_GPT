@@ -10,8 +10,25 @@ import { apiUrl } from "./api";
 // Render image assets through the owner-authenticated API rather than public URLs.
 function MessageAttachments({ attachments = [] }) {
     if (!attachments.length) return null;
-    return <div className="message-attachments">{attachments.map((image) => (
-        <img key={image.fileId} alt={image.filename || "Attached image"} crossOrigin="use-credentials" src={apiUrl(`/api/images/${image.fileId}`)} />
+    return <div className="message-attachments">{attachments.map((attachment) => (
+        attachment.contentType === "application/pdf" ? (
+            <a
+                aria-label={`Download ${attachment.filename || "attached PDF"}`}
+                className="message-pdf-attachment"
+                href={apiUrl(`/api/images/${attachment.fileId}`)}
+                key={attachment.fileId}
+                rel="noopener noreferrer"
+                target="_blank"
+            >
+                <i className="fa-solid fa-file-pdf" aria-hidden="true"></i>
+                <span>
+                    <strong>{attachment.filename || "Attached PDF"}</strong>
+                    <small>PDF document · Download</small>
+                </span>
+            </a>
+        ) : (
+            <img key={attachment.fileId} alt={attachment.filename || "Attached image"} crossOrigin="use-credentials" src={apiUrl(`/api/images/${attachment.fileId}`)} />
+        )
     ))}</div>;
 }
 

@@ -21,6 +21,7 @@ function Chatwindow() {
     } = useContext(MyContext);
 
     const [loading, setLoading] = useState(false);
+    const [agentStatus, setAgentStatus] = useState("");
     const [requestError, setRequestError] = useState(null);
     const [accountMenuOpen, setAccountMenuOpen] = useState(false);
     const [activeAccountDialog, setActiveAccountDialog] = useState(null);
@@ -31,7 +32,7 @@ function Chatwindow() {
     const [knowledgeBusy, setKnowledgeBusy] = useState(false);
     const [sendOnEnter, setSendOnEnter] = useState(() => localStorage.getItem("friendgpt-send-on-enter") !== "false");
     // Keep pending uploads local until the user sends the associated message.
-    const [selectedImages, setSelectedImages] = useState([]);
+    const [selectedAttachments, setSelectedAttachments] = useState([]);
     const [preferredName, setPreferredName] = useState(user?.preferredName || "");
     const [profileStatus, setProfileStatus] = useState("");
     const [imagePrompt, setImagePrompt] = useState("");
@@ -204,9 +205,11 @@ function Chatwindow() {
     };
 
     const getReply = async () => {
-        if ((!prompt.trim() && selectedImages.length === 0) || requestInFlight.current) return;
+        if ((!prompt.trim() && selectedAttachments.length === 0) || requestInFlight.current) return;
 
-        const currentPrompt = prompt.trim() || "What is in this image?";
+        const currentPrompt = prompt.trim() || (selectedAttachments.some((file) => file.type === "application/pdf" || /\.pdf$/i.test(file.name))
+            ? "Please review the attached PDF document."
+            : "What is in the attached image?");
         const requestThreadId = currThreadId;
         const assistantMessageId = crypto.randomUUID();
         const controller = new AbortController();
@@ -219,8 +222,8 @@ function Chatwindow() {
         setNewChat(false);
         setRequestError(null);
         try {
-            // Upload image bytes as multipart data, then send only stable IDs in the chat request.
-            const uploadedImages = await Promise.all(selectedImages.map(async (file) => {
+            // Upload attachment bytes as multipart data, then send only stable IDs in the chat request.
+            const uploadedAttachments = await Promise.all(selectedAttachments.map(async (file) => {
                 const formData = new FormData();
                 formData.append("image", file);
                 const uploadResponse = await apiFetch("/api/images/upload", { method: "POST", body: formData, signal: controller.signal });
@@ -231,14 +234,14 @@ function Chatwindow() {
             if (activeThreadId.current !== requestThreadId) return;
             setPrevChats((chats) => [
                 ...chats,
-                { role: "user", content: currentPrompt, attachments: uploadedImages.map(({ fileId, filename, contentType }) => ({ fileId, filename, contentType })) },
+                { role: "user", content: currentPrompt, attachments: uploadedAttachments.map(({ fileId, filename, contentType }) => ({ fileId, filename, contentType })) },
                 { id: assistantMessageId, role: "assistant", content: "", streaming: true }
             ]);
             const response = await apiFetch("/api/chat", {
                 method: "POST",
                 signal: controller.signal,
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: currentPrompt, threadId: requestThreadId, imageIds: uploadedImages.map((image) => image.fileId) })
+                body: JSON.stringify({ message: currentPrompt, threadId: requestThreadId, attachmentIds: uploadedAttachments.map((attachment) => attachment.fileId) })
             });
             if (!response.ok) {
                 const result = await response.json().catch(() => null);
@@ -272,8 +275,13 @@ function Chatwindow() {
                 }
 
                 if (eventName === "error") throw new Error(payload.message || "Could not finish the response");
+                if (eventName === "status") {
+                    setAgentStatus(payload.message || "Working on your request…");
+                    return;
+                }
                 if (eventName === "done") {
                     streamFinished = true;
+                    setAgentStatus("");
                     return;
                 }
                 if (typeof payload.token !== "string" || !payload.token) return;
@@ -320,7 +328,7 @@ function Chatwindow() {
                 ];
             });
             setPrompt("");
-            setSelectedImages([]);
+            setSelectedAttachments([]);
         } catch (err) {
             if (activeThreadId.current === requestThreadId) {
                 setPrevChats((chats) => {
@@ -345,6 +353,7 @@ function Chatwindow() {
             if (activeRequest.current?.controller === controller) activeRequest.current = null;
             requestInFlight.current = false;
             setLoading(false);
+            setAgentStatus("");
         }
     };
 
@@ -551,6 +560,7 @@ function Chatwindow() {
                 color="#fff"
                 loading={loading}
             />
+            {loading && agentStatus && <p aria-live="polite" className="agent-activity">{agentStatus}</p>}
 
             <div className="chatInput">
                 {requestError?.threadId === currThreadId && (
@@ -559,19 +569,21 @@ function Chatwindow() {
 
                 <form className="inputBox" onSubmit={(event) => { event.preventDefault(); getReply(); }}>
 
-                    <label className="image-upload-button" title="Attach images">
+                    <label className="image-upload-button" title="Attach images or PDFs">
                         <i className="fa-solid fa-paperclip" aria-hidden="true"></i>
-                        <span className="sr-only">Attach images</span>
-                        <input accept="image/png,image/jpeg,image/webp" disabled={loading} multiple onChange={(event) => {
+                        <span className="sr-only">Attach images or PDFs</span>
+                        <input accept=".png,.jpg,.jpeg,.webp,.pdf,image/png,image/jpeg,image/webp,application/pdf" disabled={loading} multiple onChange={(event) => {
                             const incoming = Array.from(event.target.files || []);
-                            const valid = incoming.filter((file) => ["image/png", "image/jpeg", "image/webp"].includes(file.type) && file.size <= 5 * 1024 * 1024);
-                            const exceedsLimit = selectedImages.length + valid.length > 3;
+                            const valid = incoming.filter((file) => (
+                                ["image/png", "image/jpeg", "image/webp", "application/pdf"].includes(file.type) || (!file.type && /\.pdf$/i.test(file.name))
+                            ) && file.size <= 5 * 1024 * 1024);
+                            const exceedsLimit = selectedAttachments.length + valid.length > 3;
                             if (valid.length !== incoming.length || exceedsLimit) {
-                                setRequestError({ threadId: currThreadId, message: "Attach up to 3 PNG, JPEG, or WebP images (5 MB each)." });
+                                setRequestError({ threadId: currThreadId, message: "Attach up to 3 images or PDFs (5 MB each)." });
                             } else {
                                 setRequestError(null);
                             }
-                            setSelectedImages((current) => [...current, ...valid].slice(0, 3));
+                            setSelectedAttachments((current) => [...current, ...valid].slice(0, 3));
                             event.target.value = "";
                         }} type="file" />
                     </label>
@@ -595,7 +607,7 @@ function Chatwindow() {
 
                     <button
                         aria-label="Send message"
-                        disabled={loading || (!prompt.trim() && selectedImages.length === 0)}
+                        disabled={loading || (!prompt.trim() && selectedAttachments.length === 0)}
                         id="submit"
                         type="submit"
                     >
@@ -606,8 +618,8 @@ function Chatwindow() {
                     </button>
 
                 </form>
-                {selectedImages.length > 0 && <div className="pending-images" aria-label="Images to upload">{selectedImages.map((image, index) => (
-                    <span key={`${image.name}-${index}`}>{image.name}<button aria-label={`Remove ${image.name}`} onClick={() => setSelectedImages((items) => items.filter((_, itemIndex) => itemIndex !== index))} type="button">×</button></span>
+                {selectedAttachments.length > 0 && <div className="pending-attachments" aria-label="Files to upload">{selectedAttachments.map((file, index) => (
+                    <span key={`${file.name}-${index}`}>{file.name}<button aria-label={`Remove ${file.name}`} onClick={() => setSelectedAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))} type="button">×</button></span>
                 ))}</div>}
 
                 <p className="info">

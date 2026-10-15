@@ -11,11 +11,11 @@ const messageSchema = new mongoose.Schema({
         required: true,
         maxlength: 16000
   },
-  // Store only owner-checked file metadata in thread documents, never image bytes.
+  // Store only owner-checked file metadata in thread documents, never attachment bytes.
   attachments: [{
     fileId: { type: mongoose.Schema.Types.ObjectId, required: true },
-    filename: { type: String, maxlength: 255, default: "image" },
-    contentType: { type: String, enum: ["image/png", "image/jpeg", "image/webp"], required: true }
+    filename: { type: String, maxlength: 255, default: "attachment" },
+    contentType: { type: String, enum: ["image/png", "image/jpeg", "image/webp", "application/pdf"], required: true }
   }],
     timestamp: {
         type: Date,

@@ -4,8 +4,11 @@ import getGroqResponse from "../utils/openai.js";
 
 const AssistantState = Annotation.Root({
   userId: Annotation({ reducer: (_current, update) => update, default: () => "" }),
+  requestId: Annotation({ reducer: (_current, update) => update, default: () => "" }),
   messages: Annotation({ reducer: (_current, update) => update, default: () => [] }),
   images: Annotation({ reducer: (_current, update) => update, default: () => [] }),
+  requestMode: Annotation({ reducer: (_current, update) => update, default: () => "agent" }),
+  allowLiveTools: Annotation({ reducer: (_current, update) => update, default: () => false }),
   preferredName: Annotation({ reducer: (_current, update) => update, default: () => "" }),
   knowledgeContext: Annotation({ reducer: (_current, update) => update, default: () => [] }),
   assistantReply: Annotation({ reducer: (_current, update) => update, default: () => "" })
@@ -34,6 +37,20 @@ async function retrieveKnowledge(state) {
   };
 }
 
+function planRequest(state) {
+  // Keep image understanding on the dedicated vision model; text requests can
+  // use the agent model's read-only live search and calculation tools.
+  const requestMode = state.images.length ? "vision" : "agent";
+  const allowLiveTools = requestMode === "agent";
+  console.info("Agent request planned", {
+    requestId: state.requestId,
+    mode: requestMode,
+    knowledgeEnabled: true,
+    liveToolsEnabled: allowLiveTools
+  });
+  return { requestMode, allowLiveTools };
+}
+
 async function generateResponse(state, config) {
   // Keep the existing streaming provider adapter while making retrieval and generation explicit graph steps.
   const assistantReply = await getGroqResponse(
@@ -46,24 +63,31 @@ async function generateResponse(state, config) {
     config.configurable?.onToken,
     config.configurable?.signal,
     state.knowledgeContext,
-    state.preferredName
+    state.preferredName,
+    {
+      allowLiveTools: state.allowLiveTools,
+      onStatus: config.configurable?.onStatus,
+      requestId: state.requestId
+    }
   );
   return { assistantReply };
 }
 
 // Explicit graph nodes make retrieval and answer generation independently observable and extensible.
 const assistantGraph = new StateGraph(AssistantState)
+  .addNode("planRequest", planRequest)
   .addNode("retrieveKnowledge", retrieveKnowledge)
   .addNode("generateResponse", generateResponse)
-  .addEdge(START, "retrieveKnowledge")
+  .addEdge(START, "planRequest")
+  .addEdge("planRequest", "retrieveKnowledge")
   .addEdge("retrieveKnowledge", "generateResponse")
   .addEdge("generateResponse", END)
   .compile();
 
-export async function runAssistant({ userId, messages, images = [], preferredName = "", onToken, signal }) {
+export async function runAssistant({ userId, requestId = "", messages, images = [], preferredName = "", onToken, onStatus, signal }) {
   const result = await assistantGraph.invoke(
-    { userId, messages, images, preferredName },
-    { configurable: { onToken, signal } }
+    { userId, requestId, messages, images, preferredName },
+    { configurable: { onToken, onStatus, signal } }
   );
   return result.assistantReply;
 }

@@ -7,8 +7,10 @@ SigmaGPT is a full-stack AI chat application with a React interface, an Express 
 - Email and password registration and sign-in, plus Google sign-in
 - Private conversation history associated with the authenticated user
 - User-managed text knowledge sources, retrieved privately for relevant answers
-- Authenticated PNG/JPEG/WebP image uploads and vision-enabled chat
+- Authenticated PNG/JPEG/WebP image and PDF uploads; image-aware chat and resume PDF text extraction
 - Server-side image generation stored in the user's private image library
+- Agent request planning with Groq live web search and code execution for text chats
+- Request level agent activity and duration logs for production troubleshooting
 - Preferred name saved to the account and used across conversations
 - Progressive assistant responses over Server-Sent Events (SSE)
 - Markdown rendering with GitHub Flavored Markdown and highlighted code blocks
@@ -31,9 +33,10 @@ SigmaGPT is a full-stack AI chat application with a React interface, an Express 
 
 1. The React app checks the current session with `GET /api/auth/me` and sends API requests with cookies included.
 2. The user submits a message to `POST /api/chat` with a conversation ID. The backend authenticates the session and retrieves or initializes that user's thread.
-3. A LangGraph workflow searches the authenticated user's knowledge chunks, then passes recent conversation context and relevant excerpts to Groq. Image messages are routed through a vision-capable Groq model.
-4. Each provider token is forwarded to the browser as an SSE event. The UI appends tokens to a single assistant message as they arrive.
-5. Once generation completes, the backend saves the user message and the full assistant response to MongoDB as one exchange, then sends a completion event.
+3. LangGraph plans the request: text requests use the agent model, while requests with images use the vision model. It retrieves relevant private knowledge for both paths.
+4. For text requests on a supported GPT-OSS model, Groq can call its built-in `browser_search` and `code_interpreter` tools. The model chooses whether current information or exact computation is needed, receives tool results, and writes the final answer. Image requests use Qwen vision and do not receive those built-in tools.
+5. The agent reports its planning status over SSE. Tool-enabled responses are returned after Groq finishes its search/tool loop; vision responses continue streaming as generated. Once generation completes, the backend saves the user message and full assistant response to MongoDB as one exchange.
+6. Each request receives a trace ID. Backend logs record its mode, duration, selected model, and provider failures without logging the user's message.
 
 If the client disconnects, the active provider request is aborted. Incomplete provider streams are treated as errors and are not saved as completed responses.
 
@@ -83,7 +86,7 @@ Set these backend variables in `Backend/.env`:
 | `FRONTEND_ORIGIN` | Production | Allowed frontend origin; local development defaults to `http://localhost:5173` |
 | `GROQ_MODEL` | No | Model override; defaults to `openai/gpt-oss-20b` |
 | `GROQ_API_URL` | No | OpenAI-compatible API URL override |
-| `GROQ_VISION_MODEL` | No | Vision-capable Groq model for attached images; defaults to `qwen/qwen3.6-27b` |
+| `GROQ_VISION_MODEL` | No | Vision-capable Groq model for attached images; defaults to `qwen/qwen3.8-27b` |
 | `OPENAI_API_KEY` | For image generation | Server-side key for the OpenAI image generation API; never expose it to the frontend |
 | `OPENAI_IMAGE_MODEL` | No | Image model override; defaults to `gpt-image-2` |
 
@@ -95,6 +98,8 @@ Set these frontend variables in `Frontend/.env`:
 | `VITE_GOOGLE_CLIENT_ID` | For Google sign-in | The same public Google OAuth web client ID used by the backend |
 
 Never put `GROQ_API_KEY` or other server secrets in frontend environment variables. To enable Google sign-in locally, add `http://localhost:5173` as an authorized JavaScript origin in the Google OAuth client configuration.
+
+The default `openai/gpt-oss-20b` text model supports Groq's built-in live search and code interpreter, so no separate search API key is needed. `GROQ_MODEL` can be set to `openai/gpt-oss-120b` to use the other supported model. Custom text models or non-Groq API endpoints run without these built-in tools. The tools are read-only: SigmaGPT can search and calculate, but it cannot send messages, change external accounts, or take other actions on your behalf. Uploaded images use the separate `GROQ_VISION_MODEL` path and are not sent to web search.
 
 ### Install and Run
 
@@ -126,7 +131,9 @@ Open the local URL printed by Vite, normally `http://localhost:5173`. The API li
 - A thread contains its owner, thread ID, title, and ordered messages. Messages use `user` or `assistant` roles with content and timestamps.
 - Knowledge sources are pasted as text in Settings, split into overlapping chunks, and stored under the signed-in user's ID. MongoDB text search retrieves up to four relevant chunks for each answer; matching excerpts are treated as untrusted reference material and the model is asked to cite their titles.
 - Knowledge retrieval currently uses MongoDB full-text search. It is durable and needs no additional embedding provider, but it has lower semantic recall than vector search and only accepts pasted text (no file parsing yet).
-- Images are stored in MongoDB GridFS with owner metadata. Uploads accept PNG, JPEG, or WebP up to 5 MB; each chat request can attach up to three images, which use the configured vision model. Generated images require `OPENAI_API_KEY` and are served through owner-checked routes.
+- Text agent requests can use Groq-hosted web search for changing facts and a sandboxed code interpreter for calculations. Search results are untrusted input; the model is instructed to cite current claims and not treat page content as instructions. Live tools are available only with the supported GPT-OSS models and standard Groq API endpoint.
+- Agent tools do not execute external write actions. Adding company APIs or MCP integrations should use explicit per-tool permissions, ownership checks, input validation, timeouts, and audit records before exposing any action to the model.
+- Images and PDFs are stored in MongoDB GridFS with owner metadata. Uploads accept PNG, JPEG, WebP, or PDF files up to 5 MB; each chat request can attach up to three files. Images use the configured vision model, while PDFs contribute up to 18,000 characters of selectable text across a maximum of 25 pages. Scanned PDFs without selectable text need to be uploaded as page images. Generated images require `OPENAI_API_KEY` and are served through owner-checked routes.
 - The preferred name is stored on the account profile rather than in per-thread data, so it is available in all conversations for that signed-in user.
 - The completed user/assistant exchange is persisted once generation succeeds; individual streamed tokens are not separate database messages.
 

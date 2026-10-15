@@ -144,6 +144,11 @@
     color: #aaa;
     font-size: 13px;
 }
+.agent-activity {
+    margin: 6px 0 0;
+    color: #aaa;
+    font-size: 12px;
+}
 .account-dialog-backdrop {
     position: fixed;
     z-index: 20;
@@ -365,6 +370,7 @@
     width: 100%;
         box-sizing: border-box;
     display: flex;
+    flex: 0 0 auto;
     flex-direction: column;
     justify-content: center;
     align-items: center;
@@ -389,6 +395,7 @@
 }
 /* Keep attachment and submit controls in their own columns beside the message text. */
 .image-upload-button {
+    position: relative;
     display: grid;
     width: 32px;
     height: 32px;
@@ -399,16 +406,33 @@
     cursor: pointer;
 }
 .image-upload-button:hover { background: #414141; }
-.image-upload-button input { position: absolute; width: 1px; height: 1px; opacity: 0; }
-.pending-images {
+.image-upload-button input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+}
+.image-upload-button:has(input:focus-visible) {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+.pending-attachments {
     width: min(100%, 700px);
     display: flex;
+    align-items: center;
     flex-wrap: wrap;
     gap: 7px;
     margin-top: 8px;
     text-align: left;
 }
-.pending-images > span {
+.pending-attachments > span {
+    min-width: 0;
+    max-width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     max-width: 100%;
     overflow-wrap: anywhere;
     border: 1px solid #484848;
@@ -417,7 +441,7 @@
     color: #ddd;
     font-size: 12px;
 }
-.pending-images button { margin-left: 8px; border: 0; background: transparent; color: #eee; cursor: pointer; }
+.pending-attachments button { flex: 0 0 auto; border: 0; background: transparent; color: #eee; cursor: pointer; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .inputBox textarea{
     min-width: 0;
