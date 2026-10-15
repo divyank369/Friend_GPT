@@ -2,7 +2,6 @@ import "./Sidebar.css";
 import mylogo from "./assets/mylogo.png";
 import { useContext, useEffect, useRef, useState } from "react";
 import { MyContext } from "./Mycontext";
-import { v1 as uuidv1 } from "uuid";
 import { apiFetch } from "./api";
 function Sidebar() {
 
@@ -22,7 +21,8 @@ function Sidebar() {
     const selectedThreadId = useRef(currThreadId);
 
     const createNewChat = () => {
-        const threadId = uuidv1();
+        // Random UUIDs avoid encoding a timestamp in newly created thread IDs.
+        const threadId = crypto.randomUUID();
         selectedThreadId.current = threadId;
         setCurrThreadId(threadId);
         setNewChat(true);
