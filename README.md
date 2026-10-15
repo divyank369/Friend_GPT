@@ -7,6 +7,9 @@ SigmaGPT is a full-stack AI chat application with a React interface, an Express 
 - Email and password registration and sign-in, plus Google sign-in
 - Private conversation history associated with the authenticated user
 - User-managed text knowledge sources, retrieved privately for relevant answers
+- Authenticated PNG/JPEG/WebP image uploads and vision-enabled chat
+- Server-side image generation stored in the user's private image library
+- Preferred name saved to the account and used across conversations
 - Progressive assistant responses over Server-Sent Events (SSE)
 - Markdown rendering with GitHub Flavored Markdown and highlighted code blocks
 - Thread creation, history listing, loading, and deletion
@@ -20,7 +23,7 @@ SigmaGPT is a full-stack AI chat application with a React interface, an Express 
 | Frontend | React 19, Vite, React Markdown, remark-gfm, rehype-highlight |
 | Backend | Node.js 22+, Express 5, Mongoose |
 | Database | MongoDB |
-| AI | LangGraph workflow, LangChain prompt formatting, and Groq's OpenAI-compatible streaming API |
+| AI | LangGraph workflow, LangChain prompt formatting, Groq text/vision chat, OpenAI image generation API |
 | Authentication | JWT, HTTP-only cookies, bcryptjs, Google ID token verification |
 | Supporting tools | Vite, Node.js crypto UUIDs, express-rate-limit, CORS, cookie-parser |
 
@@ -28,7 +31,7 @@ SigmaGPT is a full-stack AI chat application with a React interface, an Express 
 
 1. The React app checks the current session with `GET /api/auth/me` and sends API requests with cookies included.
 2. The user submits a message to `POST /api/chat` with a conversation ID. The backend authenticates the session and retrieves or initializes that user's thread.
-3. A LangGraph workflow searches the authenticated user's knowledge chunks, then passes recent conversation context and relevant excerpts to the configured Groq model with streaming enabled.
+3. A LangGraph workflow searches the authenticated user's knowledge chunks, then passes recent conversation context and relevant excerpts to Groq. Image messages are routed through a vision-capable Groq model.
 4. Each provider token is forwarded to the browser as an SSE event. The UI appends tokens to a single assistant message as they arrive.
 5. Once generation completes, the backend saves the user message and the full assistant response to MongoDB as one exchange, then sends a completion event.
 
@@ -80,6 +83,9 @@ Set these backend variables in `Backend/.env`:
 | `FRONTEND_ORIGIN` | Production | Allowed frontend origin; local development defaults to `http://localhost:5173` |
 | `GROQ_MODEL` | No | Model override; defaults to `openai/gpt-oss-20b` |
 | `GROQ_API_URL` | No | OpenAI-compatible API URL override |
+| `GROQ_VISION_MODEL` | No | Vision-capable Groq model for attached images; defaults to `qwen/qwen3.6-27b` |
+| `OPENAI_API_KEY` | For image generation | Server-side key for the OpenAI image generation API; never expose it to the frontend |
+| `OPENAI_IMAGE_MODEL` | No | Image model override; defaults to `gpt-image-2` |
 
 Set these frontend variables in `Frontend/.env`:
 
@@ -120,6 +126,8 @@ Open the local URL printed by Vite, normally `http://localhost:5173`. The API li
 - A thread contains its owner, thread ID, title, and ordered messages. Messages use `user` or `assistant` roles with content and timestamps.
 - Knowledge sources are pasted as text in Settings, split into overlapping chunks, and stored under the signed-in user's ID. MongoDB text search retrieves up to four relevant chunks for each answer; matching excerpts are treated as untrusted reference material and the model is asked to cite their titles.
 - Knowledge retrieval currently uses MongoDB full-text search. It is durable and needs no additional embedding provider, but it has lower semantic recall than vector search and only accepts pasted text (no file parsing yet).
+- Images are stored in MongoDB GridFS with owner metadata. Uploads accept PNG, JPEG, or WebP up to 5 MB; each chat request can attach up to three images, which use the configured vision model. Generated images require `OPENAI_API_KEY` and are served through owner-checked routes.
+- The preferred name is stored on the account profile rather than in per-thread data, so it is available in all conversations for that signed-in user.
 - The completed user/assistant exchange is persisted once generation succeeds; individual streamed tokens are not separate database messages.
 
 ## API Reference
@@ -132,6 +140,7 @@ All routes are served from the backend origin and return API errors in an `error
 | `POST` | `/api/auth/login` | No | Sign in with `email` and `password` |
 | `POST` | `/api/auth/google` | No | Sign in with a Google `idToken` |
 | `GET` | `/api/auth/me` | Yes | Return the current user |
+| `PATCH` | `/api/auth/profile` | Yes | Save the account-wide preferred name |
 | `POST` | `/api/auth/logout` | No | Clear the session cookie |
 | `POST` | `/api/chat` | Yes | Send a message and receive an SSE response stream |
 | `GET` | `/api/thread` | Yes | List the current user's threads |
@@ -140,6 +149,10 @@ All routes are served from the backend origin and return API errors in an `error
 | `GET` | `/api/knowledge` | Yes | List the current user's text knowledge sources |
 | `POST` | `/api/knowledge` | Yes | Add a titled text source for retrieval |
 | `DELETE` | `/api/knowledge/:sourceId` | Yes | Delete one of the current user's knowledge sources |
+| `POST` | `/api/images/upload` | Yes | Upload one PNG, JPEG, or WebP image (up to 5 MB) |
+| `POST` | `/api/images/generate` | Yes | Generate an image from a prompt (requires `OPENAI_API_KEY`) |
+| `GET` | `/api/images` | Yes | List the current user's 20 most recent generated images |
+| `GET` | `/api/images/:fileId` | Yes | Read an image owned by the current user |
 | `GET` | `/health` | No | Report API and database health |
 
 ### Chat Request and Stream
@@ -149,9 +162,12 @@ Send JSON to `POST /api/chat`:
 ```json
 {
   "threadId": "conversation-id",
-  "message": "Explain React hooks"
+  "message": "Explain React hooks",
+  "imageIds": []
 }
 ```
+
+For image messages, upload each file first as multipart form data (`image` field) to `/api/images/upload` and pass the returned `fileId` values in `imageIds`. The request accepts at most three images.
 
 Successful responses use `Content-Type: text/event-stream`. Token events contain one token each:
 

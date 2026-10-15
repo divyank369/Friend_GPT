@@ -351,6 +351,15 @@
     margin-top: 3px;
     color: #999;
 }
+/* Keep the persisted generation gallery readable inside the narrow Settings dialog. */
+.generated-image-card { display: grid; justify-items: start; gap: 8px; }
+.generated-image-preview {
+    display: block;
+    width: min(100%, 360px);
+    max-height: 360px;
+    object-fit: contain;
+    border-radius: 8px;
+}
 /* CHAT INPUT */
 .chatInput{
     width: 100%;
@@ -369,6 +378,41 @@
     align-items: center;
     justify-content: space-between;
 }
+/* Reserve left-side input space for the attachment picker and keep pending files removable. */
+.image-upload-button {
+    position: absolute;
+    z-index: 1;
+    left: 12px;
+    display: grid;
+    width: 32px;
+    height: 32px;
+    place-items: center;
+    border-radius: 50%;
+    color: #ddd;
+    cursor: pointer;
+}
+.image-upload-button:hover { background: #414141; }
+.image-upload-button input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.inputBox textarea { padding-left: 52px; }
+.pending-images {
+    width: min(100%, 700px);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-top: 8px;
+    text-align: left;
+}
+.pending-images > span {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    border: 1px solid #484848;
+    border-radius: 15px;
+    padding: 4px 8px;
+    color: #ddd;
+    font-size: 12px;
+}
+.pending-images button { margin-left: 8px; border: 0; background: transparent; color: #eee; cursor: pointer; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     .inputBox textarea{
     font-size: 1rem;
     border-radius: 14px;
@@ -464,7 +508,7 @@
     }
 
     .inputBox textarea {
-        padding: 12px 52px 12px 13px;
+        padding: 12px 52px 12px 52px;
         font-size: 15px;
     }
 

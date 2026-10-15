@@ -23,6 +23,8 @@ function publicUser(user) {
     return {
         id: user._id,
         name: user.name,
+        // Existing accounts without an explicit preference use their account name.
+        preferredName: user.preferredName || user.name,
         email: user.email,
         avatarUrl: user.avatarUrl || ""
     };
@@ -170,6 +172,26 @@ router.get("/me", requireAuth, async (req, res) => {
     } catch (error) {
         console.error("Session lookup error:", error);
         return res.status(500).json({ error: "Could not verify session" });
+    }
+});
+
+// Save an account-level assistant preference so it applies to every chat.
+router.patch("/profile", requireAuth, async (req, res) => {
+    const preferredName = typeof req.body?.preferredName === "string" ? req.body.preferredName.trim() : null;
+    if (preferredName === null || preferredName.length > 80) {
+        return res.status(400).json({ error: "Preferred name must be 80 characters or fewer" });
+    }
+    try {
+        const user = await User.findByIdAndUpdate(
+            req.user.userId,
+            { $set: { preferredName } },
+            { new: true, runValidators: true }
+        );
+        if (!user) return res.status(404).json({ error: "Account no longer exists" });
+        return res.json({ user: publicUser(user) });
+    } catch (error) {
+        console.error("Profile update error:", error);
+        return res.status(500).json({ error: "Could not save profile preference" });
     }
 });
 

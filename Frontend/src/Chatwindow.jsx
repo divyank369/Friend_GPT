@@ -2,7 +2,7 @@ import "./Chatwindow.css";
 import { MyContext } from "./Mycontext";
 import { lazy, Suspense, useContext, useEffect, useRef, useState } from "react";
 import { ScaleLoader } from "react-spinners";
-import { apiFetch } from "./api";
+import { apiFetch, apiUrl } from "./api";
 
 // Load Markdown and syntax-highlighting dependencies with the authenticated chat view.
 const Chat = lazy(() => import("./Chat"));
@@ -30,6 +30,13 @@ function Chatwindow() {
     const [knowledgeStatus, setKnowledgeStatus] = useState("");
     const [knowledgeBusy, setKnowledgeBusy] = useState(false);
     const [sendOnEnter, setSendOnEnter] = useState(() => localStorage.getItem("friendgpt-send-on-enter") !== "false");
+    // Keep pending uploads local until the user sends the associated message.
+    const [selectedImages, setSelectedImages] = useState([]);
+    const [preferredName, setPreferredName] = useState(user?.preferredName || "");
+    const [profileStatus, setProfileStatus] = useState("");
+    const [imagePrompt, setImagePrompt] = useState("");
+    const [generatedImages, setGeneratedImages] = useState([]);
+    const [imageDeleteStatus, setImageDeleteStatus] = useState("");
     const accountMenuRef = useRef(null);
     const requestInFlight = useRef(false);
     const activeThreadId = useRef(currThreadId);
@@ -81,6 +88,22 @@ function Chatwindow() {
         return () => { isCurrent = false; };
     }, [activeAccountDialog]);
 
+    // Reload the signed-in user's generated image gallery when Settings opens.
+    useEffect(() => {
+        if (activeAccountDialog !== "settings") return undefined;
+        let isCurrent = true;
+        apiFetch("/api/images")
+            .then(async (response) => {
+                const result = await response.json().catch(() => null);
+                if (!response.ok) throw new Error(result?.error || "Could not load generated images");
+                if (isCurrent) setGeneratedImages(result);
+            })
+            .catch((error) => {
+                if (isCurrent) setImageDeleteStatus(error.message || "Could not load generated images");
+            });
+        return () => { isCurrent = false; };
+    }, [activeAccountDialog]);
+
     // Save pasted reference text through the authenticated, owner-scoped API.
     const addKnowledgeSource = async (event) => {
         event.preventDefault();
@@ -109,6 +132,60 @@ function Chatwindow() {
         }
     };
 
+    // The preferred name is account-scoped, so it is recalled in all threads and devices.
+    const savePreferredName = async (event) => {
+        event.preventDefault();
+        setProfileStatus("");
+        try {
+            const response = await apiFetch("/api/auth/profile", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ preferredName })
+            });
+            const result = await response.json().catch(() => null);
+            if (!response.ok) throw new Error(result?.error || "Could not save preferred name");
+            setUser(result.user);
+            setProfileStatus("Preferred name saved for all chats");
+        } catch (error) {
+            setProfileStatus(error.message || "Could not save preferred name");
+        }
+    };
+
+    // Image generation is rate-limited and billed by the configured provider, so it is an explicit action.
+    const generateImage = async (event) => {
+        event.preventDefault();
+        setKnowledgeBusy(true);
+        setKnowledgeStatus("");
+        try {
+            const response = await apiFetch("/api/images/generate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ prompt: imagePrompt })
+            });
+            const result = await response.json().catch(() => null);
+            if (!response.ok) throw new Error(result?.error || "Could not generate image");
+            setGeneratedImages((images) => [result, ...images.filter((image) => image.fileId !== result.fileId)].slice(0, 20));
+            setKnowledgeStatus("Image generated");
+            setImagePrompt("");
+        } catch (error) {
+            setKnowledgeStatus(error.message || "Could not generate image");
+        } finally {
+            setKnowledgeBusy(false);
+        }
+    };
+
+    const deleteGeneratedImage = async (fileId) => {
+        try {
+            const response = await apiFetch(`/api/images/${fileId}`, { method: "DELETE" });
+            const result = await response.json().catch(() => null);
+            if (!response.ok) throw new Error(result?.error || "Could not delete image");
+            setGeneratedImages((images) => images.filter((image) => image.fileId !== fileId));
+            setImageDeleteStatus("Generated image deleted");
+        } catch (error) {
+            setImageDeleteStatus(error.message || "Could not delete image");
+        }
+    };
+
     // Keep source deletion tied to the current authenticated account.
     const deleteKnowledgeSource = async (sourceId) => {
         setKnowledgeBusy(true);
@@ -127,9 +204,9 @@ function Chatwindow() {
     };
 
     const getReply = async () => {
-        if (!prompt.trim() || requestInFlight.current) return;
+        if ((!prompt.trim() && selectedImages.length === 0) || requestInFlight.current) return;
 
-        const currentPrompt = prompt.trim();
+        const currentPrompt = prompt.trim() || "What is in this image?";
         const requestThreadId = currThreadId;
         const assistantMessageId = crypto.randomUUID();
         const controller = new AbortController();
@@ -141,26 +218,28 @@ function Chatwindow() {
         setLoading(true);
         setNewChat(false);
         setRequestError(null);
-        setPrevChats((chats) => [
-            ...chats,
-            { role: "user", content: currentPrompt },
-            { id: assistantMessageId, role: "assistant", content: "", streaming: true }
-        ]);
-
-        const options = {
-            method: "POST",
-            signal: controller.signal,
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                message: currentPrompt,
-                threadId: requestThreadId
-            })
-        };
-
         try {
-            const response = await apiFetch("/api/chat", options);
+            // Upload image bytes as multipart data, then send only stable IDs in the chat request.
+            const uploadedImages = await Promise.all(selectedImages.map(async (file) => {
+                const formData = new FormData();
+                formData.append("image", file);
+                const uploadResponse = await apiFetch("/api/images/upload", { method: "POST", body: formData, signal: controller.signal });
+                const uploadResult = await uploadResponse.json().catch(() => null);
+                if (!uploadResponse.ok) throw new Error(uploadResult?.error || "Could not upload image");
+                return uploadResult;
+            }));
+            if (activeThreadId.current !== requestThreadId) return;
+            setPrevChats((chats) => [
+                ...chats,
+                { role: "user", content: currentPrompt, attachments: uploadedImages.map(({ fileId, filename, contentType }) => ({ fileId, filename, contentType })) },
+                { id: assistantMessageId, role: "assistant", content: "", streaming: true }
+            ]);
+            const response = await apiFetch("/api/chat", {
+                method: "POST",
+                signal: controller.signal,
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message: currentPrompt, threadId: requestThreadId, imageIds: uploadedImages.map((image) => image.fileId) })
+            });
             if (!response.ok) {
                 const result = await response.json().catch(() => null);
                 throw new Error(result?.error || "Could not send your message");
@@ -241,6 +320,7 @@ function Chatwindow() {
                 ];
             });
             setPrompt("");
+            setSelectedImages([]);
         } catch (err) {
             if (activeThreadId.current === requestThreadId) {
                 setPrevChats((chats) => {
@@ -391,6 +471,26 @@ function Chatwindow() {
                                 </span>
                                 <input checked={sendOnEnter} onChange={updateSendOnEnter} type="checkbox" />
                             </label>
+                            <form className="knowledge-form" onSubmit={savePreferredName}>
+                                <label>
+                                    Name to remember across chats
+                                    <input maxLength={80} onChange={(event) => setPreferredName(event.target.value)} value={preferredName} />
+                                </label>
+                                <button type="submit">Save name</button>
+                                {profileStatus && <p className="knowledge-status" role="status">{profileStatus}</p>}
+                            </form>
+                            <section aria-labelledby="image-generation-title" className="knowledge-settings">
+                                <div><strong id="image-generation-title">Generate an image</strong><p>Generated images are saved privately to your account.</p></div>
+                                <form className="knowledge-form" onSubmit={generateImage}>
+                                    <label>Image prompt<textarea maxLength={2000} onChange={(event) => setImagePrompt(event.target.value)} required rows={3} value={imagePrompt} /></label>
+                                    <button disabled={knowledgeBusy || !imagePrompt.trim()} type="submit">{knowledgeBusy ? "Working…" : "Generate image"}</button>
+                                </form>
+                                {generatedImages.map((image) => <div className="generated-image-card" key={image.fileId}>
+                                    <img className="generated-image-preview" alt={image.filename || "Generated result"} crossOrigin="use-credentials" src={apiUrl(image.url)} />
+                                    <button onClick={() => deleteGeneratedImage(image.fileId)} type="button">Delete image</button>
+                                </div>)}
+                                {imageDeleteStatus && <p className="knowledge-status" role="status">{imageDeleteStatus}</p>}
+                            </section>
                             <section aria-labelledby="knowledge-title" className="knowledge-settings">
                                 <div>
                                     <strong id="knowledge-title">Your knowledge</strong>
@@ -459,6 +559,23 @@ function Chatwindow() {
 
                 <form className="inputBox" onSubmit={(event) => { event.preventDefault(); getReply(); }}>
 
+                    <label className="image-upload-button" title="Attach images">
+                        <i className="fa-solid fa-paperclip" aria-hidden="true"></i>
+                        <span className="sr-only">Attach images</span>
+                        <input accept="image/png,image/jpeg,image/webp" disabled={loading} multiple onChange={(event) => {
+                            const incoming = Array.from(event.target.files || []);
+                            const valid = incoming.filter((file) => ["image/png", "image/jpeg", "image/webp"].includes(file.type) && file.size <= 5 * 1024 * 1024);
+                            const exceedsLimit = selectedImages.length + valid.length > 3;
+                            if (valid.length !== incoming.length || exceedsLimit) {
+                                setRequestError({ threadId: currThreadId, message: "Attach up to 3 PNG, JPEG, or WebP images (5 MB each)." });
+                            } else {
+                                setRequestError(null);
+                            }
+                            setSelectedImages((current) => [...current, ...valid].slice(0, 3));
+                            event.target.value = "";
+                        }} type="file" />
+                    </label>
+
                     <textarea
                         aria-label="Message"
                         maxLength={8000}
@@ -478,7 +595,7 @@ function Chatwindow() {
 
                     <button
                         aria-label="Send message"
-                        disabled={loading || !prompt.trim()}
+                        disabled={loading || (!prompt.trim() && selectedImages.length === 0)}
                         id="submit"
                         type="submit"
                     >
@@ -489,6 +606,9 @@ function Chatwindow() {
                     </button>
 
                 </form>
+                {selectedImages.length > 0 && <div className="pending-images" aria-label="Images to upload">{selectedImages.map((image, index) => (
+                    <span key={`${image.name}-${index}`}>{image.name}<button aria-label={`Remove ${image.name}`} onClick={() => setSelectedImages((items) => items.filter((_, itemIndex) => itemIndex !== index))} type="button">×</button></span>
+                ))}</div>}
 
                 <p className="info">
                     SigmaGPT can make mistakes. Verify important information.

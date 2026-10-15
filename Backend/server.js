@@ -8,6 +8,7 @@ import rateLimit from "express-rate-limit";
  import authRoutes from "./routes/auth.js";
 import knowledgeRoutes from "./routes/knowledge.js";
 import KnowledgeChunk from "./models/KnowledgeChunk.js";
+import imageRoutes from "./routes/images.js";
 
 
  const app = express();
@@ -57,6 +58,22 @@ const chatLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: "You are sending messages too quickly. Please try again shortly." }
 });
+// Image generation has a provider cost, so apply a separate per-IP budget.
+const imageGenerationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many image generation requests. Please try again later." }
+});
+// Cap storage-heavy uploads independently of normal chat traffic.
+const imageUploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many image uploads. Please try again later." }
+});
 
 app.use("/api", apiLimiter);
 app.use("/api/auth", (req, res, next) => {
@@ -70,6 +87,10 @@ app.use("/api/chat", chatLimiter);
 app.use("/api", chatRoutes);
 // Knowledge ingestion is authenticated and uses the regular API request limiter.
 app.use("/api/knowledge", knowledgeRoutes);
+// Image routes keep uploads, generated assets, and image reads authenticated.
+app.use("/api/images/generate", imageGenerationLimiter);
+app.use("/api/images/upload", imageUploadLimiter);
+app.use("/api/images", imageRoutes);
 
 app.use((error, _req, res, _next) => {
   const statusCode = error.status === 413 ? 413 : error.status === 400 ? 400 : 500;

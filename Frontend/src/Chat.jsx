@@ -5,6 +5,15 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/github-dark.css";
+import { apiUrl } from "./api";
+
+// Render image assets through the owner-authenticated API rather than public URLs.
+function MessageAttachments({ attachments = [] }) {
+    if (!attachments.length) return null;
+    return <div className="message-attachments">{attachments.map((image) => (
+        <img key={image.fileId} alt={image.filename || "Attached image"} crossOrigin="use-credentials" src={apiUrl(`/api/images/${image.fileId}`)} />
+    ))}</div>;
+}
 
 function LatestReply({ chat }) {
     const isStreaming = Boolean(chat.streaming);
@@ -86,6 +95,7 @@ function Chat() {
                                 {chat.content}
                             </ReactMarkdown>
                         )}
+                        {chat.role === "user" && <MessageAttachments attachments={chat.attachments} />}
                     </div>
                 ))}
                 {latestReplyId && (

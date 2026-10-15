@@ -7,6 +7,13 @@ const userSchema = new mongoose.Schema({
         trim: true,
         maxlength: 80
     },
+    // Persist the name the assistant should use across every conversation.
+    preferredName: {
+        type: String,
+        trim: true,
+        maxlength: 80,
+        default: ""
+    },
     email: {
         type: String,
         required: true,

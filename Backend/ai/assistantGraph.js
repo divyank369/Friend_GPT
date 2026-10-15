@@ -5,6 +5,8 @@ import getGroqResponse from "../utils/openai.js";
 const AssistantState = Annotation.Root({
   userId: Annotation({ reducer: (_current, update) => update, default: () => "" }),
   messages: Annotation({ reducer: (_current, update) => update, default: () => [] }),
+  images: Annotation({ reducer: (_current, update) => update, default: () => [] }),
+  preferredName: Annotation({ reducer: (_current, update) => update, default: () => "" }),
   knowledgeContext: Annotation({ reducer: (_current, update) => update, default: () => [] }),
   assistantReply: Annotation({ reducer: (_current, update) => update, default: () => "" })
 });
@@ -35,10 +37,16 @@ async function retrieveKnowledge(state) {
 async function generateResponse(state, config) {
   // Keep the existing streaming provider adapter while making retrieval and generation explicit graph steps.
   const assistantReply = await getGroqResponse(
-    state.messages,
+    state.messages.map((message, index) => index === state.messages.length - 1 && state.images.length
+      ? { ...message, content: [
+        { type: "text", text: message.content },
+        ...state.images.map((image) => ({ type: "image_url", image_url: { url: image.dataUrl } }))
+      ] }
+      : message),
     config.configurable?.onToken,
     config.configurable?.signal,
-    state.knowledgeContext
+    state.knowledgeContext,
+    state.preferredName
   );
   return { assistantReply };
 }
@@ -52,9 +60,9 @@ const assistantGraph = new StateGraph(AssistantState)
   .addEdge("generateResponse", END)
   .compile();
 
-export async function runAssistant({ userId, messages, onToken, signal }) {
+export async function runAssistant({ userId, messages, images = [], preferredName = "", onToken, signal }) {
   const result = await assistantGraph.invoke(
-    { userId, messages },
+    { userId, messages, images, preferredName },
     { configurable: { onToken, signal } }
   );
   return result.assistantReply;

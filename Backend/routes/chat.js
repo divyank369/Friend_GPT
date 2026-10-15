@@ -2,6 +2,9 @@ import express from "express";
 import Thread from "../models/Thread.js"; 
 import { runAssistant } from "../ai/assistantGraph.js";
 import requireAuth from "../middleware/requireAuth.js";
+import User from "../models/User.js";
+import mongoose from "mongoose";
+import { GridFSBucket, ObjectId } from "mongodb";
 
 const router = express.Router();
 router.use(requireAuth);
@@ -51,12 +54,14 @@ router.use(requireAuth);
 
 router.post("/chat", async (req, res) => {
   const { threadId: suppliedThreadId, message } = req.body || {};
+  const suppliedFileIds = req.body?.imageIds ?? [];
   // Normalize IDs once so validation and database lookups use the same value.
   const threadId = typeof suppliedThreadId === "string" ? suppliedThreadId.trim() : suppliedThreadId;
 
   if (
     typeof threadId !== "string" || !threadId.trim() || threadId.length > 128 ||
-    typeof message !== "string" || !message.trim() || message.length > 8000
+    typeof message !== "string" || !message.trim() || message.length > 8000 ||
+    !Array.isArray(suppliedFileIds) || suppliedFileIds.length > 3 || suppliedFileIds.some((id) => typeof id !== "string" || !ObjectId.isValid(id))
   ) {
     return res.status(400).json({ error: "Provide a valid conversation ID and a message under 8,000 characters" });
   }
@@ -83,6 +88,28 @@ router.post("/chat", async (req, res) => {
       });
     }
 
+    // Validate new images and keep the latest attached images available for follow-up questions.
+    const historyImageIds = (thread.messages || []).slice(-20).reverse().flatMap((entry) => (entry.attachments || []).map((image) => String(image.fileId)).reverse());
+    const modelImageIds = [...new Set([...suppliedFileIds, ...historyImageIds])].slice(0, 3);
+    const imageFiles = modelImageIds.length
+      ? await mongoose.connection.db.collection("images.files").find({
+        _id: { $in: modelImageIds.map((id) => new ObjectId(id)) },
+        "metadata.ownerId": String(req.user.userId)
+      }).toArray()
+      : [];
+    const imageFileIds = new Set(imageFiles.map((file) => String(file._id)));
+    if (suppliedFileIds.some((id) => !imageFileIds.has(id))) return res.status(400).json({ error: "One or more images are invalid" });
+    const imageBucket = new GridFSBucket(mongoose.connection.db, { bucketName: "images" });
+    const images = await Promise.all(modelImageIds.filter((id) => imageFileIds.has(id)).map(async (id) => {
+      const file = imageFiles.find((item) => String(item._id) === id);
+      return new Promise((resolve, reject) => {
+        const chunks = [];
+        imageBucket.openDownloadStream(file._id).on("data", (chunk) => chunks.push(chunk))
+          .once("error", reject)
+          .once("end", () => resolve({ dataUrl: `data:${file.metadata.contentType};base64,${Buffer.concat(chunks).toString("base64")}` }));
+      });
+    }));
+
     const modelMessages = [];
     let remainingCharacters = 24000;
     const conversation = [...(thread.messages || []), { role: "user", content: message.trim() }];
@@ -96,9 +123,17 @@ router.post("/chat", async (req, res) => {
     }
 
     let streamStarted = false;
+    const account = await User.findById(req.user.userId).select("preferredName name").lean();
+    const attachmentRefs = imageFiles.filter((file) => suppliedFileIds.includes(String(file._id))).map((file) => ({
+      fileId: file._id,
+      filename: file.filename || "image",
+      contentType: file.metadata.contentType
+    }));
     const assistantReply = await runAssistant({
       userId: req.user.userId,
       messages: modelMessages,
+      images,
+      preferredName: account?.preferredName || account?.name || "",
       onToken: (token) => {
       if (res.destroyed || generationController.signal.aborted) return;
       if (!streamStarted) {
@@ -124,7 +159,7 @@ router.post("/chat", async (req, res) => {
     // Use an atomic append instead of saving the stale document loaded before
     // generation; overlapping requests must not replace each other's messages.
     const exchange = [
-      { role: "user", content: message.trim() },
+      { role: "user", content: message.trim(), ...(attachmentRefs.length ? { attachments: attachmentRefs } : {}) },
       { role: "assistant", content: assistantReply }
     ];
     const updatedAt = new Date();
