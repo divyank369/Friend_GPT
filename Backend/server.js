@@ -6,6 +6,8 @@
 import rateLimit from "express-rate-limit";
  import chatRoutes from "./routes/chat.js";
  import authRoutes from "./routes/auth.js";
+import knowledgeRoutes from "./routes/knowledge.js";
+import KnowledgeChunk from "./models/KnowledgeChunk.js";
 
 
  const app = express();
@@ -66,6 +68,8 @@ app.use("/api/auth", (req, res, next) => {
 }, authRoutes);
 app.use("/api/chat", chatLimiter);
 app.use("/api", chatRoutes);
+// Knowledge ingestion is authenticated and uses the regular API request limiter.
+app.use("/api/knowledge", knowledgeRoutes);
 
 app.use((error, _req, res, _next) => {
   const statusCode = error.status === 413 ? 413 : error.status === 400 ? 400 : 500;
@@ -97,6 +101,8 @@ const startServer = async () => {
   }
 
   await mongoose.connect(process.env.MONGODB_URI);
+  // Create the owner-scoped full-text index before serving RAG requests.
+  await KnowledgeChunk.createIndexes();
   console.log("Connected to MongoDB");
 
   app.listen(PORT, () => {

@@ -1,9 +1,11 @@
 import "./Chatwindow.css";
-import Chat from "./Chat";
 import { MyContext } from "./Mycontext";
-import { useContext, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useContext, useEffect, useRef, useState } from "react";
 import { ScaleLoader } from "react-spinners";
 import { apiFetch } from "./api";
+
+// Load Markdown and syntax-highlighting dependencies with the authenticated chat view.
+const Chat = lazy(() => import("./Chat"));
 
 function Chatwindow() {
     const {
@@ -22,6 +24,11 @@ function Chatwindow() {
     const [requestError, setRequestError] = useState(null);
     const [accountMenuOpen, setAccountMenuOpen] = useState(false);
     const [activeAccountDialog, setActiveAccountDialog] = useState(null);
+    const [knowledgeSources, setKnowledgeSources] = useState([]);
+    const [knowledgeTitle, setKnowledgeTitle] = useState("");
+    const [knowledgeText, setKnowledgeText] = useState("");
+    const [knowledgeStatus, setKnowledgeStatus] = useState("");
+    const [knowledgeBusy, setKnowledgeBusy] = useState(false);
     const [sendOnEnter, setSendOnEnter] = useState(() => localStorage.getItem("friendgpt-send-on-enter") !== "false");
     const accountMenuRef = useRef(null);
     const requestInFlight = useRef(false);
@@ -57,6 +64,67 @@ function Chatwindow() {
             document.removeEventListener("keydown", closeOnEscape);
         };
     }, []);
+
+    useEffect(() => {
+        if (activeAccountDialog !== "settings") return undefined;
+        let isCurrent = true;
+        // Load the signed-in user's private knowledge sources only when settings opens.
+        apiFetch("/api/knowledge")
+            .then(async (response) => {
+                const result = await response.json().catch(() => null);
+                if (!response.ok) throw new Error(result?.error || "Could not load knowledge sources");
+                if (isCurrent) setKnowledgeSources(result);
+            })
+            .catch((error) => {
+                if (isCurrent) setKnowledgeStatus(error.message || "Could not load knowledge sources");
+            });
+        return () => { isCurrent = false; };
+    }, [activeAccountDialog]);
+
+    // Save pasted reference text through the authenticated, owner-scoped API.
+    const addKnowledgeSource = async (event) => {
+        event.preventDefault();
+        setKnowledgeBusy(true);
+        setKnowledgeStatus("");
+        try {
+            const response = await apiFetch("/api/knowledge", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title: knowledgeTitle, content: knowledgeText })
+            });
+            const result = await response.json().catch(() => null);
+            if (!response.ok) throw new Error(result?.error || "Could not save knowledge source");
+            setKnowledgeSources((sources) => [{
+                sourceId: result.sourceId,
+                title: result.title,
+                chunkCount: result.chunkCount
+            }, ...sources]);
+            setKnowledgeTitle("");
+            setKnowledgeText("");
+            setKnowledgeStatus("Knowledge source saved");
+        } catch (error) {
+            setKnowledgeStatus(error.message || "Could not save knowledge source");
+        } finally {
+            setKnowledgeBusy(false);
+        }
+    };
+
+    // Keep source deletion tied to the current authenticated account.
+    const deleteKnowledgeSource = async (sourceId) => {
+        setKnowledgeBusy(true);
+        setKnowledgeStatus("");
+        try {
+            const response = await apiFetch(`/api/knowledge/${sourceId}`, { method: "DELETE" });
+            const result = await response.json().catch(() => null);
+            if (!response.ok) throw new Error(result?.error || "Could not delete knowledge source");
+            setKnowledgeSources((sources) => sources.filter((source) => source.sourceId !== sourceId));
+            setKnowledgeStatus("Knowledge source deleted");
+        } catch (error) {
+            setKnowledgeStatus(error.message || "Could not delete knowledge source");
+        } finally {
+            setKnowledgeBusy(false);
+        }
+    };
 
     const getReply = async () => {
         if (!prompt.trim() || requestInFlight.current) return;
@@ -323,12 +391,61 @@ function Chatwindow() {
                                 </span>
                                 <input checked={sendOnEnter} onChange={updateSendOnEnter} type="checkbox" />
                             </label>
+                            <section aria-labelledby="knowledge-title" className="knowledge-settings">
+                                <div>
+                                    <strong id="knowledge-title">Your knowledge</strong>
+                                    <p>Add private text references for answers in your chats. Relevant excerpts may be sent to the configured AI provider.</p>
+                                </div>
+                                <form className="knowledge-form" onSubmit={addKnowledgeSource}>
+                                    <label>
+                                        Source title
+                                        <input
+                                            maxLength={120}
+                                            onChange={(event) => setKnowledgeTitle(event.target.value)}
+                                            required
+                                            value={knowledgeTitle}
+                                        />
+                                    </label>
+                                    <label>
+                                        Reference text
+                                        <textarea
+                                            maxLength={30000}
+                                            onChange={(event) => setKnowledgeText(event.target.value)}
+                                            placeholder="Paste policies, notes, or other reference text"
+                                            required
+                                            rows={5}
+                                            value={knowledgeText}
+                                        />
+                                    </label>
+                                    <button disabled={knowledgeBusy || !knowledgeText.trim()} type="submit">
+                                        {knowledgeBusy ? "Saving…" : "Add source"}
+                                    </button>
+                                </form>
+                                {knowledgeStatus && <p className="knowledge-status" role="status">{knowledgeStatus}</p>}
+                                <ul className="knowledge-list">
+                                    {knowledgeSources.map((source) => (
+                                        <li key={source.sourceId}>
+                                            <span>{source.title}<small>{source.chunkCount} text sections</small></span>
+                                            <button
+                                                aria-label={`Delete ${source.title}`}
+                                                disabled={knowledgeBusy}
+                                                onClick={() => deleteKnowledgeSource(source.sourceId)}
+                                                type="button"
+                                            >
+                                                Delete
+                                            </button>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </section>
                         </div>
                     </section>
                 </div>
             )}
 
-            <Chat />
+            <Suspense fallback={<div className="chat-loading">Loading conversation…</div>}>
+                <Chat />
+            </Suspense>
 
             <ScaleLoader
                 color="#fff"

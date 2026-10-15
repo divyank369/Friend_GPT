@@ -3,7 +3,6 @@ import "./App.css";
 import Chatwindow from "./Chatwindow";
 import { MyContext } from "./Mycontext";
 import { useEffect, useState } from "react";
-import { v1 as uuidv1 } from "uuid";
 import { GoogleOAuthProvider } from "@react-oauth/google";
 import Auth from "./Auth";
 import { apiFetch } from "./api";
@@ -12,7 +11,8 @@ function App() {
     const [user, setUser] = useState(null);
     const [checkingSession, setCheckingSession] = useState(true);
     const [prompt, setPrompt] = useState("");
-    const [currThreadId, setCurrThreadId] = useState(uuidv1());
+    // Random UUIDs avoid exposing creation time in client-generated thread IDs.
+    const [currThreadId, setCurrThreadId] = useState(() => crypto.randomUUID());
     const [prevChats, setPrevChats] = useState([]);
     const [newChat, setNewChat] = useState(true);
     const [allThreads, setAllThreads] = useState([]);

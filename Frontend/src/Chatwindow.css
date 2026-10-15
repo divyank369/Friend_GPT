@@ -137,6 +137,13 @@
     color: #aaa;
     text-align: center;
 }
+.chat-loading {
+    flex: 1;
+    display: grid;
+    place-items: center;
+    color: #aaa;
+    font-size: 13px;
+}
 .account-dialog-backdrop {
     position: fixed;
     z-index: 20;
@@ -253,6 +260,96 @@
     box-shadow: none;
     accent-color: #a8c9bf;
     cursor: pointer;
+}
+/* RAG source controls stay inside the account settings dialog and scroll on small screens. */
+.account-dialog:has(.knowledge-settings) {
+    max-height: min(90vh, 760px);
+    overflow-y: auto;
+}
+.knowledge-settings {
+    display: grid;
+    gap: 12px;
+    padding-top: 16px;
+    border-top: 1px solid #393939;
+}
+.knowledge-settings > div > strong {
+    color: #eee;
+    font-size: 13px;
+}
+.knowledge-settings > div > p,
+.knowledge-status {
+    margin: 5px 0 0;
+    color: #aaa;
+    font-size: 12px;
+    line-height: 1.45;
+}
+.knowledge-form,
+.knowledge-form label {
+    display: grid;
+    gap: 7px;
+}
+.knowledge-form {
+    gap: 10px;
+}
+.knowledge-form label {
+    color: #ccc;
+    font-size: 12px;
+}
+.knowledge-form input,
+.knowledge-form textarea {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid #484848;
+    border-radius: 6px;
+    padding: 9px 10px;
+    background: #1b1b1b;
+    color: #eee;
+    font: inherit;
+}
+.knowledge-form textarea {
+    resize: vertical;
+}
+.knowledge-form button,
+.knowledge-list button {
+    justify-self: start;
+    border: 1px solid #525252;
+    border-radius: 6px;
+    padding: 7px 10px;
+    background: #343434;
+    color: #eee;
+    cursor: pointer;
+}
+.knowledge-form button:disabled,
+.knowledge-list button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+.knowledge-status[role="status"] {
+    color: #b7d8cd;
+}
+.knowledge-list {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.knowledge-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    color: #ddd;
+    font-size: 12px;
+}
+.knowledge-list li span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.knowledge-list small {
+    display: block;
+    margin-top: 3px;
+    color: #999;
 }
 /* CHAT INPUT */
 .chatInput{

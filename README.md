@@ -6,6 +6,7 @@ SigmaGPT is a full-stack AI chat application with a React interface, an Express 
 
 - Email and password registration and sign-in, plus Google sign-in
 - Private conversation history associated with the authenticated user
+- User-managed text knowledge sources, retrieved privately for relevant answers
 - Progressive assistant responses over Server-Sent Events (SSE)
 - Markdown rendering with GitHub Flavored Markdown and highlighted code blocks
 - Thread creation, history listing, loading, and deletion
@@ -19,15 +20,15 @@ SigmaGPT is a full-stack AI chat application with a React interface, an Express 
 | Frontend | React 19, Vite, React Markdown, remark-gfm, rehype-highlight |
 | Backend | Node.js 22+, Express 5, Mongoose |
 | Database | MongoDB |
-| AI | Groq API using its OpenAI-compatible Chat Completions streaming interface |
+| AI | LangGraph workflow, LangChain prompt formatting, and Groq's OpenAI-compatible streaming API |
 | Authentication | JWT, HTTP-only cookies, bcryptjs, Google ID token verification |
-| Supporting tools | Vite, UUID, express-rate-limit, CORS, cookie-parser |
+| Supporting tools | Vite, Node.js crypto UUIDs, express-rate-limit, CORS, cookie-parser |
 
 ## How It Works
 
 1. The React app checks the current session with `GET /api/auth/me` and sends API requests with cookies included.
 2. The user submits a message to `POST /api/chat` with a conversation ID. The backend authenticates the session and retrieves or initializes that user's thread.
-3. The backend sends the recent conversation context and SigmaGPT system instruction to the configured Groq model with streaming enabled.
+3. A LangGraph workflow searches the authenticated user's knowledge chunks, then passes recent conversation context and relevant excerpts to the configured Groq model with streaming enabled.
 4. Each provider token is forwarded to the browser as an SSE event. The UI appends tokens to a single assistant message as they arrive.
 5. Once generation completes, the backend saves the user message and the full assistant response to MongoDB as one exchange, then sends a completion event.
 
@@ -117,11 +118,13 @@ Open the local URL printed by Vite, normally `http://localhost:5173`. The API li
 - Chat and thread endpoints require an authenticated session. Thread lookups and writes are scoped to the session user's ID.
 - The API rate-limits requests globally, with stricter limits for authentication and chat generation.
 - A thread contains its owner, thread ID, title, and ordered messages. Messages use `user` or `assistant` roles with content and timestamps.
+- Knowledge sources are pasted as text in Settings, split into overlapping chunks, and stored under the signed-in user's ID. MongoDB text search retrieves up to four relevant chunks for each answer; matching excerpts are treated as untrusted reference material and the model is asked to cite their titles.
+- Knowledge retrieval currently uses MongoDB full-text search. It is durable and needs no additional embedding provider, but it has lower semantic recall than vector search and only accepts pasted text (no file parsing yet).
 - The completed user/assistant exchange is persisted once generation succeeds; individual streamed tokens are not separate database messages.
 
 ## API Reference
 
-All routes are served from the backend origin. Most API errors use an `error` field; a missing thread currently returns a JSON string with status `404`. Authentication routes are under `/api/auth`; chat and thread routes are under `/api`.
+All routes are served from the backend origin and return API errors in an `error` field. Authentication routes are under `/api/auth`; chat, thread, and knowledge routes are under `/api`.
 
 | Method | Endpoint | Authentication | Purpose |
 | --- | --- | --- | --- |
@@ -134,6 +137,9 @@ All routes are served from the backend origin. Most API errors use an `error` fi
 | `GET` | `/api/thread` | Yes | List the current user's threads |
 | `GET` | `/api/thread/:threadId` | Yes | Load one thread's messages |
 | `DELETE` | `/api/thread/:threadId` | Yes | Delete one of the current user's threads |
+| `GET` | `/api/knowledge` | Yes | List the current user's text knowledge sources |
+| `POST` | `/api/knowledge` | Yes | Add a titled text source for retrieval |
+| `DELETE` | `/api/knowledge/:sourceId` | Yes | Delete one of the current user's knowledge sources |
 | `GET` | `/health` | No | Report API and database health |
 
 ### Chat Request and Stream
