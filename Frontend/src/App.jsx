@@ -9,7 +9,6 @@ import { apiFetch } from "./api";
 
 function App() {
     const [user, setUser] = useState(null);
-    const [checkingSession, setCheckingSession] = useState(true);
     const [prompt, setPrompt] = useState("");
     // Random UUIDs avoid exposing creation time in client-generated thread IDs.
     const [currThreadId, setCurrThreadId] = useState(() => crypto.randomUUID());
@@ -26,10 +25,7 @@ function App() {
             .then((result) => {
                 if (isMounted && result?.user) setUser(result.user);
             })
-            .catch(() => {})
-            .finally(() => {
-                if (isMounted) setCheckingSession(false);
-            });
+            .catch(() => {});
 
         return () => {
             isMounted = false;
@@ -54,9 +50,7 @@ function App() {
     };
 
     let content;
-    if (checkingSession) {
-        content = <main className="auth-loading">Checking your session…</main>;
-    } else if (!user) {
+    if (!user) {
         content = <Auth googleEnabled={Boolean(googleClientId)} onAuthenticated={setUser} />;
     } else {
         content = (

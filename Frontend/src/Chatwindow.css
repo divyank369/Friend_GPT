@@ -372,20 +372,27 @@
 
 }
 .inputBox{
-        width: min(100%, 700px);
-    position: relative;
-    display: flex;
+    width: min(100%, 700px);
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr) 42px;
     align-items: center;
-    justify-content: space-between;
+    gap: 4px;
+    padding: 4px 8px;
+    box-sizing: border-box;
+    border-radius: 14px;
+    background-color: rgba(255,255,255,0.05);
+    box-shadow: 0 54px 55px rgba(0, 0, 0, 0.05),
+                0 -12px 30px rgba(0, 0, 0, 0.05),
+                0 4px 6px rgba(0, 0, 0, 0.05),
+                0 12px 3px rgba(0, 0, 0, 0.05),
+                0 -3px 5px rgba(0, 0, 0, 0.05);
 }
-/* Reserve left-side input space for the attachment picker and keep pending files removable. */
+/* Keep attachment and submit controls in their own columns beside the message text. */
 .image-upload-button {
-    position: absolute;
-    z-index: 1;
-    left: 12px;
     display: grid;
     width: 32px;
     height: 32px;
+    justify-self: center;
     place-items: center;
     border-radius: 50%;
     color: #ddd;
@@ -393,7 +400,6 @@
 }
 .image-upload-button:hover { background: #414141; }
 .image-upload-button input { position: absolute; width: 1px; height: 1px; opacity: 0; }
-.inputBox textarea { padding-left: 52px; }
 .pending-images {
     width: min(100%, 700px);
     display: flex;
@@ -413,34 +419,28 @@
 }
 .pending-images button { margin-left: 8px; border: 0; background: transparent; color: #eee; cursor: pointer; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-    .inputBox textarea{
+.inputBox textarea{
+    min-width: 0;
+    width: 100%;
     font-size: 1rem;
     border-radius: 14px;
-    padding: 15px;
-    width: 100%;
-        min-width: 0;
-        max-height: 180px;
-        box-sizing: border-box;
-        resize: vertical;
+    padding: 15px 4px;
+    max-height: 180px;
+    box-sizing: border-box;
+    resize: vertical;
     border : none;
-    background-color: rgba(255,255,255,0.05);
+    background: transparent;
         color: #ececec;
         font: inherit;
         line-height: 1.5;
-    box-shadow: 0 54px 55px rgba(0, 0, 0, 0.05),
-                0 -12px 30px rgba(0, 0, 0, 0.05),
-                0 4px 6px rgba(0, 0, 0, 0.05),
-                0 12px 3px rgba(0, 0, 0, 0.05),
-                0 -3px 5px rgba(0, 0, 0, 0.05);
-
 }
 
 .inputBox textarea:focus{
     outline: none;
 }
 #submit{
-    position: absolute;
-    right: 10px;
+    position: static;
+    justify-self: center;
     width: 34px;
     height: 34px;
     border: none;
@@ -508,7 +508,7 @@
     }
 
     .inputBox textarea {
-        padding: 12px 52px 12px 52px;
+        padding: 12px 4px;
         font-size: 15px;
     }
 

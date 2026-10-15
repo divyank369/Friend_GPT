@@ -111,7 +111,16 @@ router.post("/generate", async (req, res) => {
     const result = await response.json().catch(() => null);
     if (!response.ok || typeof result?.data?.[0]?.b64_json !== "string") {
       console.error("Image generation provider error:", response.status, result?.error?.message || "invalid response");
-      return res.status(response.status === 429 ? 503 : 502).json({ error: "Image generation is temporarily unavailable" });
+      if ([400, 404].includes(response.status)) {
+        return res.status(502).json({ error: "The configured image model rejected the request. Check OPENAI_IMAGE_MODEL and confirm that the API key has access to it." });
+      }
+      if ([401, 403].includes(response.status)) {
+        return res.status(503).json({ error: "Image generation is not available with the current server API key." });
+      }
+      if (response.status === 429) {
+        return res.status(503).json({ error: "The image provider is busy or its usage limit was reached. Try again later." });
+      }
+      return res.status(502).json({ error: "Image generation is temporarily unavailable" });
     }
     const bytes = Buffer.from(result.data[0].b64_json, "base64");
     if (bytes.length > 20 * 1024 * 1024 || detectImageType(bytes) !== "image/png") {
