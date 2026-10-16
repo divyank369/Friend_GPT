@@ -4,20 +4,11 @@ import jwt from "jsonwebtoken";
 import { OAuth2Client } from "google-auth-library";
 import User from "../models/User.js";
 import requireAuth from "../middleware/requireAuth.js";
+import { getSessionCookieOptions, SESSION_COOKIE_NAME, SESSION_DURATION_MS } from "../utils/sessionCookie.js";
 
 const router = express.Router();
 const googleClient = new OAuth2Client();
-const cookieName = "friendgpt_session";
-const sessionDurationMs = 7 * 24 * 60 * 60 * 1000;
-const cookieSameSite = process.env.SESSION_COOKIE_SAME_SITE === "lax"
-    ? "lax"
-    : process.env.NODE_ENV === "production" ? "none" : "lax";
-const sessionCookieOptions = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production" || cookieSameSite === "none",
-    sameSite: cookieSameSite,
-    path: "/"
-};
+const sessionCookieOptions = getSessionCookieOptions();
 
 function publicUser(user) {
     return {
@@ -37,12 +28,13 @@ function setSessionCookie(res, user) {
     }
 
     const token = jwt.sign({}, secret, {
+        algorithm: "HS256",
         subject: user._id.toString(),
         expiresIn: "7d"
     });
-    res.cookie(cookieName, token, {
+    res.cookie(SESSION_COOKIE_NAME, token, {
         ...sessionCookieOptions,
-        maxAge: sessionDurationMs
+        maxAge: SESSION_DURATION_MS
     });
 }
 
@@ -78,7 +70,7 @@ router.post("/signup", async (req, res) => {
         if (error.code === 11000) {
             return res.status(409).json({ error: "An account with this email already exists" });
         }
-        console.error("Signup error:", error);
+        console.error("Signup failed", { name: error.name });
         return res.status(500).json({ error: "Could not create account" });
     }
 });
@@ -103,7 +95,7 @@ router.post("/login", async (req, res) => {
         setSessionCookie(res, user);
         return res.json({ user: publicUser(user) });
     } catch (error) {
-        console.error("Login error:", error);
+        console.error("Login failed", { name: error.name });
         return res.status(500).json({ error: "Could not sign in" });
     }
 });
@@ -156,7 +148,7 @@ router.post("/google", async (req, res) => {
         if (error.code === 11000) {
             return res.status(409).json({ error: "An account with this email already exists" });
         }
-        console.error("Google account error:", error);
+        console.error("Google account operation failed", { name: error.name });
         return res.status(500).json({ error: "Could not complete Google sign-in" });
     }
 });
@@ -165,12 +157,12 @@ router.get("/me", requireAuth, async (req, res) => {
     try {
         const user = await User.findById(req.user.userId);
         if (!user) {
-            res.clearCookie(cookieName, sessionCookieOptions);
+            res.clearCookie(SESSION_COOKIE_NAME, sessionCookieOptions);
             return res.status(401).json({ error: "Account no longer exists" });
         }
         return res.json({ user: publicUser(user) });
     } catch (error) {
-        console.error("Session lookup error:", error);
+        console.error("Session lookup failed", { name: error.name });
         return res.status(500).json({ error: "Could not verify session" });
     }
 });
@@ -190,15 +182,13 @@ router.patch("/profile", requireAuth, async (req, res) => {
         if (!user) return res.status(404).json({ error: "Account no longer exists" });
         return res.json({ user: publicUser(user) });
     } catch (error) {
-        console.error("Profile update error:", error);
+        console.error("Profile update failed", { name: error.name });
         return res.status(500).json({ error: "Could not save profile preference" });
     }
 });
 
 router.post("/logout", (req, res) => {
-    res.clearCookie(cookieName, {
-        ...sessionCookieOptions
-    });
+    res.clearCookie(SESSION_COOKIE_NAME, sessionCookieOptions);
     return res.json({ message: "Signed out" });
 });
 

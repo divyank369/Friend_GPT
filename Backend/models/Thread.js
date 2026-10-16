@@ -56,5 +56,6 @@ const threadSchema = new mongoose.Schema({
 });
 
 threadSchema.index({ ownerId: 1, updatedAt: -1 });
+threadSchema.index({ ownerId: 1, "messages.attachments.fileId": 1 });
 
 export default mongoose.model("Thread",threadSchema);

@@ -4,6 +4,17 @@ import { GridFSBucket, ObjectId } from "mongodb";
 import multer from "multer";
 import requireAuth from "../middleware/requireAuth.js";
 import { detectUploadType, isAllowedUploadMime, supportedUploadTypes } from "../utils/uploadTypes.js";
+import { ownerScopedQuery } from "../security/ownerQuery.js";
+import {
+  deleteFileIfUnreferenced,
+  formatImageGalleryItem,
+  releaseFilesFromChat,
+  reserveFilesForChat,
+  UPLOAD_RETENTION_MS
+} from "../utils/fileLifecycle.js";
+import { randomUUID } from "node:crypto";
+import { writeGridFSFile } from "../utils/gridfs.js";
+import Thread from "../models/Thread.js";
 
 const router = express.Router();
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
@@ -19,16 +30,32 @@ function imageBucket() {
 }
 
 // Save bytes with ownership metadata; all reads below enforce that owner.
-function saveImage(buffer, contentType, filename, ownerId, generated = false) {
-  return new Promise((resolve, reject) => {
-    const stream = imageBucket().openUploadStream(filename.slice(0, 255), {
-      // GridFS stores application-specific MIME metadata in its metadata document.
-      metadata: { ownerId: String(ownerId), contentType, generated }
-    });
-    stream.once("error", reject);
-    stream.once("finish", () => resolve(stream.id));
-    stream.end(buffer);
+function saveImage(buffer, contentType, filename, ownerId, generated = false, signal) {
+  return writeGridFSFile(imageBucket(), {
+    buffer,
+    filename,
+    signal,
+    metadata: {
+      // GridFS keeps searchable type and owner metadata in the file document.
+      ownerId: String(ownerId),
+      contentType,
+      generated,
+      lifecycleState: generated ? "generated" : "pending",
+      ...(!generated ? {
+        pendingExpiresAt: new Date(Date.now() + UPLOAD_RETENTION_MS),
+        cleanupAfter: new Date(Date.now() + UPLOAD_RETENTION_MS)
+      } : {})
+    }
   });
+}
+
+function requestAbortSignal(req, res) {
+  const controller = new AbortController();
+  req.once("aborted", () => controller.abort());
+  res.once("close", () => {
+    if (!res.writableEnded) controller.abort();
+  });
+  return controller.signal;
 }
 
 router.use(requireAuth);
@@ -37,20 +64,14 @@ router.use(requireAuth);
 router.get("/", async (req, res) => {
   try {
     const files = await mongoose.connection.db.collection("images.files")
-      .find({ "metadata.ownerId": String(req.user.userId), "metadata.generated": true })
+      .find(ownerScopedQuery(String(req.user.userId), { "metadata.generated": true }, "metadata.ownerId"))
       .sort({ uploadDate: -1 })
       .limit(20)
-      .project({ filename: 1, contentType: 1, uploadDate: 1 })
+      .project({ filename: 1, "metadata.contentType": 1, uploadDate: 1 })
       .toArray();
-    return res.json(files.map((file) => ({
-      fileId: String(file._id),
-      filename: file.filename,
-      contentType: file.metadata?.contentType,
-      createdAt: file.uploadDate,
-      url: `/api/images/${file._id}`
-    })));
+    return res.json(files.map(formatImageGalleryItem));
   } catch (error) {
-    console.error("Image gallery error:", error);
+    console.error("Image gallery failed", { name: error.name });
     return res.status(500).json({ error: "Could not load generated images" });
   }
 });
@@ -69,8 +90,9 @@ router.post("/upload", (req, res, next) => {
   if (!req.file || !supportedUploadTypes.has(detectedType) || !isAllowedUploadMime(req.file.mimetype, req.file.originalname) || (req.file.mimetype !== detectedType && !genericPdfMime)) {
     return res.status(400).json({ error: "Upload a valid PNG, JPEG, WebP image, or PDF" });
   }
+  const signal = requestAbortSignal(req, res);
   try {
-    const fileId = await saveImage(req.file.buffer, detectedType, req.file.originalname || "attachment", req.user.userId);
+    const fileId = await saveImage(req.file.buffer, detectedType, req.file.originalname || "attachment", req.user.userId, false, signal);
     return res.status(201).json({
       fileId: String(fileId),
       filename: (req.file.originalname || "attachment").slice(0, 255),
@@ -78,7 +100,8 @@ router.post("/upload", (req, res, next) => {
       url: `/api/images/${fileId}`
     });
   } catch (error) {
-    console.error("Image upload error:", error);
+    if (signal.aborted || res.destroyed) return;
+    console.error("Image upload failed", { name: error.name });
     return res.status(500).json({ error: "Could not save image" });
   }
 });
@@ -89,6 +112,7 @@ router.post("/generate", async (req, res) => {
   if (!prompt || prompt.length > 2000) return res.status(400).json({ error: "Enter an image prompt under 2,000 characters" });
   if (!process.env.OPENAI_API_KEY) return res.status(503).json({ error: "Image generation is not configured on the server" });
 
+  const signal = requestAbortSignal(req, res);
   try {
     const response = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
@@ -101,11 +125,12 @@ router.post("/generate", async (req, res) => {
         quality: "medium",
         output_format: "png"
       }),
-      signal: AbortSignal.timeout(90000)
+      signal: AbortSignal.any([signal, AbortSignal.timeout(90000)])
     });
     const result = await response.json().catch(() => null);
+    if (signal.aborted || res.destroyed) return;
     if (!response.ok || typeof result?.data?.[0]?.b64_json !== "string") {
-      console.error("Image generation provider error:", response.status, result?.error?.message || "invalid response");
+      console.error("Image generation provider rejected request", { status: response.status });
       if ([400, 404].includes(response.status)) {
         return res.status(502).json({ error: "The configured image model rejected the request. Check OPENAI_IMAGE_MODEL and confirm that the API key has access to it." });
       }
@@ -121,10 +146,12 @@ router.post("/generate", async (req, res) => {
     if (bytes.length > 20 * 1024 * 1024 || detectUploadType(bytes) !== "image/png") {
       return res.status(502).json({ error: "Image provider returned an invalid image" });
     }
-    const fileId = await saveImage(bytes, "image/png", "generated-image.png", req.user.userId, true);
+    if (signal.aborted || res.destroyed) return;
+    const fileId = await saveImage(bytes, "image/png", "generated-image.png", req.user.userId, true, signal);
     return res.status(201).json({ fileId: String(fileId), filename: "generated-image.png", contentType: "image/png", url: `/api/images/${fileId}` });
   } catch (error) {
-    console.error("Image generation error:", error);
+    if (signal.aborted || res.destroyed) return;
+    console.error("Image generation failed", { name: error.name });
     const timeout = error.name === "TimeoutError";
     return res.status(timeout ? 504 : 502).json({ error: timeout ? "Image generation took too long" : "Image generation is temporarily unavailable" });
   }
@@ -134,10 +161,31 @@ router.post("/generate", async (req, res) => {
 router.get("/:fileId", async (req, res) => {
   if (!ObjectId.isValid(req.params.fileId)) return res.status(404).json({ error: "Image not found" });
   const fileId = new ObjectId(req.params.fileId);
+  const requestId = randomUUID();
+  let leased = false;
+  let releasePromise;
+  const releaseLease = () => {
+    if (!leased || releasePromise) return releasePromise;
+    releasePromise = releaseFilesFromChat({
+      files: mongoose.connection.db.collection("images.files"),
+      fileIds: [fileId],
+      ownerId: req.user.userId,
+      requestId
+    }).catch((error) => console.error("Image read lease release deferred", { name: error.name }));
+    return releasePromise;
+  };
   try {
-    const file = await mongoose.connection.db.collection("images.files").findOne({ _id: fileId, "metadata.ownerId": String(req.user.userId) });
+    const file = await mongoose.connection.db.collection("images.files").findOne(ownerScopedQuery(String(req.user.userId), { _id: fileId }, "metadata.ownerId"));
     const contentType = file?.metadata?.contentType;
     if (!file || !supportedUploadTypes.has(contentType)) return res.status(404).json({ error: "Attachment not found" });
+    const reserved = await reserveFilesForChat({
+      files: mongoose.connection.db.collection("images.files"),
+      fileIds: [fileId],
+      ownerId: req.user.userId,
+      requestId
+    });
+    if (!reserved) return res.status(409).json({ error: "Attachment is being removed. Try again shortly." });
+    leased = true;
     const headers = {
       "Content-Type": contentType,
       "Content-Length": String(file.length),
@@ -150,13 +198,19 @@ router.get("/:fileId", async (req, res) => {
       headers["Content-Disposition"] = `attachment; filename="${filename}"`;
     }
     res.set(headers);
-    return imageBucket().openDownloadStream(fileId).on("error", (error) => {
-      console.error("Image stream error:", error);
+    const download = imageBucket().openDownloadStream(fileId);
+    download.once("close", () => { void releaseLease(); });
+    download.once("error", (error) => {
+      void releaseLease();
+      console.error("Image stream failed", { name: error.name });
       if (!res.headersSent) res.status(500).end();
       else res.destroy(error);
-    }).pipe(res);
+    });
+    res.once("close", () => { void releaseLease(); });
+    return download.pipe(res);
   } catch (error) {
-    console.error("Image read error:", error);
+    await releaseLease();
+    console.error("Image read failed", { name: error.name });
     return res.status(500).json({ error: "Could not load image" });
   }
 });
@@ -166,15 +220,20 @@ router.delete("/:fileId", async (req, res) => {
   if (!ObjectId.isValid(req.params.fileId)) return res.status(404).json({ error: "Image not found" });
   const fileId = new ObjectId(req.params.fileId);
   try {
-    const ownedFile = await mongoose.connection.db.collection("images.files").findOne({
-      _id: fileId,
-      "metadata.ownerId": String(req.user.userId)
+    const result = await deleteFileIfUnreferenced({
+      db: mongoose.connection.db,
+      bucket: imageBucket(),
+      ThreadModel: Thread,
+      fileId,
+      ownerId: req.user.userId,
+      includeGenerated: true
     });
-    if (!ownedFile) return res.status(404).json({ error: "Image not found" });
-    await imageBucket().delete(fileId);
+    if (result === "missing") return res.status(404).json({ error: "Image not found" });
+    if (result === "referenced") return res.status(409).json({ error: "This attachment is used in a conversation and cannot be deleted yet" });
+    if (result === "busy") return res.status(409).json({ error: "This attachment is being used. Try again shortly." });
     return res.json({ message: "Image deleted" });
   } catch (error) {
-    console.error("Image delete error:", error);
+    console.error("Image delete failed", { name: error.name });
     return res.status(500).json({ error: "Could not delete image" });
   }
 });

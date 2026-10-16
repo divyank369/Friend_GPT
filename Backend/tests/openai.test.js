@@ -101,6 +101,35 @@ test("enables Groq live search and code tools for supported text requests", asyn
   assert.deepEqual(tokens, [answer]);
 });
 
+test("falls back to ordinary streaming when Groq rejects built-in tools", async () => {
+  let calls = 0;
+  globalThis.fetch = async (_url, options) => {
+    calls += 1;
+    const requestBody = JSON.parse(options.body);
+    if (calls === 1) {
+      assert.equal(requestBody.stream, false);
+      return new Response(JSON.stringify({ error: { message: "account lacks tool access" } }), { status: 400 });
+    }
+    assert.equal(requestBody.stream, true);
+    assert.equal("tools" in requestBody, false);
+    assert.match(requestBody.messages.at(-1).content, /Do not claim to have searched/);
+    return streamResponse([contentEvent("I cannot verify that live."), "data: [DONE]\n\n"]);
+  };
+
+  const statuses = [];
+  const result = await getGroqResponse(
+    [{ role: "user", content: "What is happening today?" }],
+    undefined,
+    undefined,
+    [],
+    "",
+    { allowLiveTools: true, onStatus: (status) => statuses.push(status) }
+  );
+  assert.equal(calls, 2);
+  assert.equal(result, "I cannot verify that live.");
+  assert.ok(statuses.some((status) => status.includes("unavailable")));
+});
+
 test("keeps image requests on the streaming vision model without built-in text tools", async () => {
   globalThis.fetch = async (_url, options) => {
     const requestBody = JSON.parse(options.body);

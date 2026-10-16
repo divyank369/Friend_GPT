@@ -8,18 +8,21 @@ import { GridFSBucket, ObjectId } from "mongodb";
 import { randomUUID } from "node:crypto";
 import { extractPdfText, MAX_PDF_TEXT_CHARACTERS } from "../utils/pdfText.js";
 import { supportedUploadTypes } from "../utils/uploadTypes.js";
+import { selectModelAttachmentIds } from "../utils/chatAttachments.js";
+import { ownerScopedQuery } from "../security/ownerQuery.js";
+import { collectThreadFileIds, deleteFileIfUnreferenced, releaseFilesFromChat, reserveFilesForChat } from "../utils/fileLifecycle.js";
 
 const router = express.Router();
 router.use(requireAuth);
 
     router.get("/thread", async (req, res) => {
         try{
-      const threads = await Thread.find({ ownerId: req.user.userId })
+      const threads = await Thread.find(ownerScopedQuery(req.user.userId))
         .select("threadId title updatedAt")
         .sort({ updatedAt: -1 });
       return res.json(threads);
         }catch(err){
-      console.error("Thread list error:", err);
+      console.error("Thread list failed", { name: err.name });
       return res.status(500).json({ error: "Could not fetch conversations" });
         }
     });
@@ -27,7 +30,7 @@ router.use(requireAuth);
         try{
             const {threadId} = req.params;
             // Bound response size even for legacy threads created before retention limits.
-            const thread = await Thread.findOne({ threadId, ownerId: req.user.userId })
+            const thread = await Thread.findOne(ownerScopedQuery(req.user.userId, { threadId }))
               .select({ messages: { $slice: -100 } });
             if(!thread){
                 // Keep API errors consistently machine-readable for frontend clients.
@@ -35,21 +38,36 @@ router.use(requireAuth);
             }
             return res.json(thread.messages);
         }catch(err){
-            console.error("Thread fetch error:", err);
+            console.error("Thread fetch failed", { name: err.name });
             return res.status(500).json({ error: "Could not fetch conversation" });
         }
     });
     router.delete("/thread/:threadId", async (req, res) => {
         try{
             const {threadId} = req.params;
-            const thread = await Thread.findOneAndDelete({ threadId, ownerId: req.user.userId });
+            const thread = await Thread.findOneAndDelete(ownerScopedQuery(req.user.userId, { threadId }));
             if(!thread){
                 // Keep API errors consistently machine-readable for frontend clients.
                 return res.status(404).json({ error: "Thread not found" });
             }
+            const bucket = new GridFSBucket(mongoose.connection.db, { bucketName: "images" });
+            for (const fileId of collectThreadFileIds(thread.messages || [])) {
+                try {
+                    await deleteFileIfUnreferenced({
+                        db: mongoose.connection.db,
+                        bucket,
+                        ThreadModel: Thread,
+                        fileId,
+                        ownerId: req.user.userId
+                    });
+                } catch (cleanupError) {
+                    console.error("Thread attachment cleanup deferred", { name: cleanupError.name });
+                    break;
+                }
+            }
             return res.json({ message: "Conversation deleted" });
         }catch(err){
-            console.error("Thread delete error:", err);
+            console.error("Thread delete failed", { name: err.name });
             return res.status(500).json({ error: "Could not delete conversation" });
         }
 
@@ -72,6 +90,8 @@ router.post("/chat", async (req, res) => {
 
   const requestId = randomUUID();
   const requestStartedAt = Date.now();
+  let reservedAttachmentIds = [];
+  let requestPersisted = false;
 
   const generationController = new AbortController();
   req.once("aborted", () => generationController.abort());
@@ -81,7 +101,7 @@ router.post("/chat", async (req, res) => {
 
   try {
     // Load only the retained tail so old unbounded records cannot inflate memory use.
-    let thread = await Thread.findOne({ threadId, ownerId: req.user.userId })
+    let thread = await Thread.findOne(ownerScopedQuery(req.user.userId, { threadId }))
       .select({ messages: { $slice: -100 } });
 
     if (!thread) {
@@ -95,14 +115,12 @@ router.post("/chat", async (req, res) => {
       });
     }
 
-    // Keep current attachments and the latest ones available for follow-up questions.
-    const historyAttachmentIds = (thread.messages || []).slice(-20).reverse().flatMap((entry) => (entry.attachments || []).map((attachment) => String(attachment.fileId)).reverse());
-    const modelAttachmentIds = [...new Set([...suppliedFileIds, ...historyAttachmentIds])].slice(0, 3);
+    // Earlier images are reused only when the user refers to an image.
+    const modelAttachmentIds = selectModelAttachmentIds(message, thread.messages || [], suppliedFileIds);
     const attachmentFiles = modelAttachmentIds.length
-      ? await mongoose.connection.db.collection("images.files").find({
-        _id: { $in: modelAttachmentIds.map((id) => new ObjectId(id)) },
-        "metadata.ownerId": String(req.user.userId)
-      }).toArray()
+      ? await mongoose.connection.db.collection("images.files").find(ownerScopedQuery(
+        String(req.user.userId), { _id: { $in: modelAttachmentIds.map((id) => new ObjectId(id)) } }, "metadata.ownerId"
+      )).toArray()
       : [];
     const attachmentsById = new Map(attachmentFiles.map((file) => [String(file._id), file]));
     if (suppliedFileIds.some((id) => !attachmentsById.has(id))) return res.status(400).json({ error: "One or more attachments are invalid" });
@@ -110,6 +128,15 @@ router.post("/chat", async (req, res) => {
       return res.status(400).json({ error: "One or more attachments have an unsupported file type" });
     }
     const orderedAttachments = modelAttachmentIds.map((id) => attachmentsById.get(id)).filter(Boolean);
+    const filesCollection = mongoose.connection.db.collection("images.files");
+    const reserved = await reserveFilesForChat({
+      files: filesCollection,
+      fileIds: orderedAttachments.map((file) => file._id),
+      ownerId: req.user.userId,
+      requestId
+    });
+    if (!reserved) return res.status(409).json({ error: "One or more attachments are being removed. Please upload them again." });
+    reservedAttachmentIds = reserved;
     const imageBucket = new GridFSBucket(mongoose.connection.db, { bucketName: "images" });
     const readAttachment = (file) => new Promise((resolve, reject) => {
       const chunks = [];
@@ -217,7 +244,7 @@ router.post("/chat", async (req, res) => {
         // unique-key race by atomically appending to the thread that won.
         if (saveError.code !== 11000) throw saveError;
         const savedThread = await Thread.findOneAndUpdate(
-          { threadId, ownerId: req.user.userId },
+          ownerScopedQuery(req.user.userId, { threadId }),
           {
             $push: { messages: { $each: exchange, $slice: -100 } },
             $set: { updatedAt }
@@ -231,7 +258,7 @@ router.post("/chat", async (req, res) => {
       }
     } else {
       const savedThread = await Thread.findOneAndUpdate(
-        { _id: thread._id, ownerId: req.user.userId },
+        ownerScopedQuery(req.user.userId, { _id: thread._id }),
         {
           $push: { messages: { $each: exchange, $slice: -100 } },
           $set: { updatedAt }
@@ -245,6 +272,7 @@ router.post("/chat", async (req, res) => {
         return res.end();
       }
     }
+    requestPersisted = true;
 
     console.info("Agent request completed", {
       requestId,
@@ -258,7 +286,7 @@ router.post("/chat", async (req, res) => {
     console.error("Agent request failed", {
       requestId,
       durationMs: Date.now() - requestStartedAt,
-      message: err.message
+      name: err.name
     });
     const statusCode = err.statusCode || 500;
     const errorMessage = err.statusCode ? err.message : "Could not process your message";
@@ -267,6 +295,33 @@ router.post("/chat", async (req, res) => {
       return res.end();
     }
     return res.status(statusCode).json({ error: errorMessage });
+  } finally {
+    try {
+      if (reservedAttachmentIds.length) {
+        await releaseFilesFromChat({
+          files: mongoose.connection.db.collection("images.files"),
+          fileIds: reservedAttachmentIds,
+          ownerId: req.user.userId,
+          requestId,
+          committed: requestPersisted
+        });
+      }
+      if (!requestPersisted) {
+        const bucket = new GridFSBucket(mongoose.connection.db, { bucketName: "images" });
+        for (const fileId of [...new Set(suppliedFileIds)]) {
+          await deleteFileIfUnreferenced({
+            db: mongoose.connection.db,
+            bucket,
+            ThreadModel: Thread,
+            fileId,
+            ownerId: req.user.userId,
+            pendingOnly: true
+          });
+        }
+      }
+    } catch (cleanupError) {
+      console.error("Chat attachment cleanup deferred", { name: cleanupError.name });
+    }
   }
 });
 

@@ -3,6 +3,7 @@ import express from "express";
 import mongoose from "mongoose";
 import KnowledgeChunk from "../models/KnowledgeChunk.js";
 import requireAuth from "../middleware/requireAuth.js";
+import { ownerScopedQuery } from "../security/ownerQuery.js";
 
 const router = express.Router();
 const MAX_SOURCE_CHARACTERS = 30000;
@@ -37,7 +38,7 @@ router.get("/", async (req, res) => {
   try {
     // Group chunk rows into source summaries without returning private document text.
     const sources = await KnowledgeChunk.aggregate([
-      { $match: { ownerId: new mongoose.Types.ObjectId(req.user.userId) } },
+      { $match: ownerScopedQuery(new mongoose.Types.ObjectId(req.user.userId)) },
       {
         $group: {
           _id: "$sourceId",
@@ -51,7 +52,7 @@ router.get("/", async (req, res) => {
     ]);
     return res.json(sources.map(({ _id, ...source }) => ({ sourceId: _id, ...source })));
   } catch (error) {
-    console.error("Knowledge list error:", error);
+    console.error("Knowledge list failed", { name: error.name });
     return res.status(500).json({ error: "Could not fetch knowledge sources" });
   }
 });
@@ -65,7 +66,7 @@ router.post("/", async (req, res) => {
 
   try {
     // Enforce a small per-user source cap before chunking to bound storage and search cost.
-    const existingSources = await KnowledgeChunk.distinct("sourceId", { ownerId: req.user.userId });
+    const existingSources = await KnowledgeChunk.distinct("sourceId", ownerScopedQuery(req.user.userId));
     if (existingSources.length >= MAX_SOURCES_PER_USER) {
       return res.status(409).json({ error: "Knowledge source limit reached" });
     }
@@ -74,7 +75,7 @@ router.post("/", async (req, res) => {
     if (!chunks.length) return res.status(400).json({ error: "The source does not contain readable text" });
     const sourceId = randomUUID();
     const documents = chunks.map(({ content: chunkContent }) => ({
-      ownerId: req.user.userId,
+      ...ownerScopedQuery(req.user.userId),
       sourceId,
       title,
       content: chunkContent
@@ -82,7 +83,7 @@ router.post("/", async (req, res) => {
     await KnowledgeChunk.insertMany(documents, { ordered: true });
     return res.status(201).json({ sourceId, title, chunkCount: chunks.length });
   } catch (error) {
-    console.error("Knowledge save error:", error);
+    console.error("Knowledge save failed", { name: error.name });
     return res.status(500).json({ error: "Could not save knowledge source" });
   }
 });
@@ -91,13 +92,12 @@ router.delete("/:sourceId", async (req, res) => {
   try {
     // Match both owner and source ID so users cannot delete another account's knowledge.
     const result = await KnowledgeChunk.deleteMany({
-      ownerId: req.user.userId,
-      sourceId: req.params.sourceId
+      ...ownerScopedQuery(req.user.userId, { sourceId: req.params.sourceId })
     });
     if (!result.deletedCount) return res.status(404).json({ error: "Knowledge source not found" });
     return res.json({ message: "Knowledge source deleted" });
   } catch (error) {
-    console.error("Knowledge delete error:", error);
+    console.error("Knowledge delete failed", { name: error.name });
     return res.status(500).json({ error: "Could not delete knowledge source" });
   }
 });

@@ -8,32 +8,31 @@ import rateLimit from "express-rate-limit";
  import authRoutes from "./routes/auth.js";
 import knowledgeRoutes from "./routes/knowledge.js";
 import KnowledgeChunk from "./models/KnowledgeChunk.js";
+import Thread from "./models/Thread.js";
 import imageRoutes from "./routes/images.js";
+import { createOriginGuard, parseAllowedOrigins } from "./security/originPolicy.js";
+import { cleanupExpiredUploads, cleanupOrphanedGridFSChunks } from "./utils/fileLifecycle.js";
+import { GridFSBucket } from "mongodb";
 
 
  const app = express();
 
  const PORT = process.env.PORT || 8080;
-const allowedOrigins = (process.env.FRONTEND_ORIGIN || (process.env.NODE_ENV === "production" ? "" : "http://localhost:5173"))
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+const allowedOrigins = parseAllowedOrigins(process.env.FRONTEND_ORIGIN, process.env.NODE_ENV === "production" ? "" : undefined);
 
 app.set("trust proxy", 1);
+app.use((_req, res, next) => {
+  // The web app uses CORS for API assets; block cross-site no-CORS embedding.
+  res.setHeader("Cross-Origin-Resource-Policy", "same-site");
+  return next();
+});
 app.use(cors({
   origin(origin, callback) {
     callback(null, !origin || allowedOrigins.includes(origin));
   },
   credentials: true
 }));
-app.use((req, res, next) => {
-  const origin = req.get("Origin");
-  const changesState = ["POST", "PUT", "PATCH", "DELETE"].includes(req.method);
-  if (changesState && origin && !allowedOrigins.includes(origin)) {
-    return res.status(403).json({ error: "Request origin is not allowed" });
-  }
-  return next();
-});
+app.use(createOriginGuard(allowedOrigins));
 app.use(express.json({ limit: "64kb" }));
 app.use(cookieParser());
 
@@ -99,7 +98,7 @@ app.use((error, _req, res, _next) => {
     : statusCode === 400
       ? "Request body must contain valid JSON"
       : "An unexpected server error occurred";
-  if (statusCode === 500) console.error("Unhandled API error:", error);
+  if (statusCode === 500) console.error("Unhandled API error", { statusCode });
   return res.status(statusCode).json({ error: message });
 });
 
@@ -122,9 +121,33 @@ const startServer = async () => {
   }
 
   await mongoose.connect(process.env.MONGODB_URI);
-  // Create the owner-scoped full-text index before serving RAG requests.
+  // Create indexes used for private knowledge retrieval and attachment reference checks.
   await KnowledgeChunk.createIndexes();
+  await Thread.createIndexes();
+  await mongoose.connection.db.collection("images.files").createIndex({ "metadata.generated": 1, uploadDate: 1 });
+  await mongoose.connection.db.collection("images.files").createIndex({ "metadata.pendingExpiresAt": 1 });
+  await mongoose.connection.db.collection("images.files").createIndex({ "metadata.cleanupAfter": 1 });
   console.log("Connected to MongoDB");
+
+  const bucket = new GridFSBucket(mongoose.connection.db, { bucketName: "images" });
+  const sweepExpiredUploads = async () => {
+    try {
+      const result = await cleanupExpiredUploads({
+        db: mongoose.connection.db,
+        bucket,
+        ThreadModel: Thread
+      });
+      const orphanChunks = await cleanupOrphanedGridFSChunks({ db: mongoose.connection.db, bucket });
+      if (result.deleted || orphanChunks) {
+        console.info("Expired upload cleanup completed", { deleted: result.deleted, orphanChunks });
+      }
+    } catch (error) {
+      console.error("Expired upload cleanup deferred", { name: error.name });
+    }
+  };
+  void sweepExpiredUploads();
+  const cleanupTimer = setInterval(sweepExpiredUploads, 60 * 60 * 1000);
+  cleanupTimer.unref();
 
   app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
@@ -132,7 +155,7 @@ const startServer = async () => {
 };
 
 startServer().catch((error) => {
-  console.error("Server startup failed:", error.message);
+  console.error("Server startup failed", { name: error.name });
   process.exit(1);
 });
 

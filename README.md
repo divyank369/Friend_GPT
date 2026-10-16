@@ -83,7 +83,8 @@ Set these backend variables in `Backend/.env`:
 | `GROQ_API_KEY` | Yes | Server-side API key used for AI requests |
 | `AUTH_JWT_SECRET` | Yes | Secret used to sign session tokens; use a long random value |
 | `GOOGLE_CLIENT_ID` | For Google sign-in | Google OAuth web client ID; the server verifies Google ID tokens against it |
-| `FRONTEND_ORIGIN` | Production | Allowed frontend origin; local development defaults to `http://localhost:5173` |
+| `FRONTEND_ORIGIN` | Production | Comma-separated exact frontend origins (scheme and host, no paths); local development defaults to `http://localhost:5173` |
+| `SESSION_COOKIE_SAME_SITE` | No | `none` by default in production for the separate Render `onrender.com` sites; local development defaults to `lax`. Use `lax` for a same-site custom-domain deployment. `none` always requires HTTPS. |
 | `GROQ_MODEL` | No | Model override; defaults to `openai/gpt-oss-20b` |
 | `GROQ_API_URL` | No | OpenAI-compatible API URL override |
 | `GROQ_VISION_MODEL` | No | Vision-capable Groq model for attached images; defaults to `qwen/qwen3.8-27b` |
@@ -125,6 +126,8 @@ Open the local URL printed by Vite, normally `http://localhost:5173`. The API li
 
 - Passwords are hashed with bcryptjs; the password hash is excluded from normal user queries.
 - Successful sign-in sets a signed JWT in the `friendgpt_session` HTTP-only cookie. Sessions expire after seven days.
+- Production session cookies are `Secure`, `HttpOnly`, and `SameSite=None` by default because Render's `onrender.com` hostnames are separate sites. Use `SESSION_COOKIE_SAME_SITE=lax` when deploying frontend and API under a same-site custom domain; state-changing requests always require an exact allowed `Origin`.
+- Every state-changing request (including sign-in and sign-out) must include an `Origin` matching `FRONTEND_ORIGIN`; requests without an origin are rejected. Keep this list limited to trusted frontend origins.
 - Google credentials are verified server-side using the Google ID token and configured client ID.
 - Chat and thread endpoints require an authenticated session. Thread lookups and writes are scoped to the session user's ID.
 - The API rate-limits requests globally, with stricter limits for authentication and chat generation.

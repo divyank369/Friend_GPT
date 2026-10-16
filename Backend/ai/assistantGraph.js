@@ -1,6 +1,7 @@
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import KnowledgeChunk from "../models/KnowledgeChunk.js";
 import getGroqResponse from "../utils/openai.js";
+import { ownerScopedQuery } from "../security/ownerQuery.js";
 
 const AssistantState = Annotation.Root({
   userId: Annotation({ reducer: (_current, update) => update, default: () => "" }),
@@ -19,22 +20,28 @@ async function retrieveKnowledge(state) {
   if (!latestUserMessage?.content?.trim()) return { knowledgeContext: [] };
 
   // MongoDB text search provides durable lexical RAG without requiring a new vector service.
-  const matches = await KnowledgeChunk.find({
-    ownerId: state.userId,
-    $text: { $search: latestUserMessage.content.slice(0, 500) }
-  }, {
-    title: 1,
-    content: 1,
-    sourceId: 1,
-    score: { $meta: "textScore" }
-  })
-    .sort({ score: { $meta: "textScore" } })
-    .limit(4)
-    .lean();
+  try {
+    const matches = await KnowledgeChunk.find(ownerScopedQuery(state.userId, {
+      $text: { $search: latestUserMessage.content.slice(0, 500) }
+    }), {
+      title: 1,
+      content: 1,
+      sourceId: 1,
+      score: { $meta: "textScore" }
+    })
+      .sort({ score: { $meta: "textScore" } })
+      .limit(4)
+      .lean();
 
-  return {
-    knowledgeContext: matches.map(({ title, content, sourceId }) => ({ title, content, sourceId }))
-  };
+    return {
+      knowledgeContext: matches.map(({ title, content, sourceId }) => ({ title, content, sourceId }))
+    };
+  } catch (error) {
+    // A database/index hiccup should not turn a normal assistant request into
+    // a failed chat. Do not log the query: it can contain private user text.
+    console.warn("Knowledge retrieval unavailable", { name: error.name });
+    return { knowledgeContext: [] };
+  }
 }
 
 function planRequest(state) {

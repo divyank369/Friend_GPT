@@ -25,7 +25,7 @@ const getGroqResponse = async (messages, onToken = () => {}, signal, knowledgeCo
   } catch {}
   const supportsBuiltInTools = ["openai/gpt-oss-20b", "openai/gpt-oss-120b"].includes(model)
     && apiHost === "api.groq.com";
-  const toolsEnabled = Boolean(agentOptions.allowLiveTools && supportsBuiltInTools && !containsImage);
+  let toolsEnabled = Boolean(agentOptions.allowLiveTools && supportsBuiltInTools && !containsImage);
   const currentDate = new Date().toISOString();
   const systemInstruction = `You are SigmaGPT, the AI assistant inside the SigmaGPT application.
 
@@ -77,30 +77,51 @@ Current date and time: ${currentDate} (UTC). Live search and code tools are not 
   let reader;
   try {
     if (signal?.aborted) throw signal.reason || new DOMException("Request aborted", "AbortError");
-    const response = await fetch(apiUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
+    const makeRequest = (requestMessages, includeTools) => ({
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
         "Authorization": `Bearer ${apiKey}`
-    },
+      },
       body: JSON.stringify({
         model,
         messages: [
           ...formattedSystemMessages.map((entry) => ({ role: "system", content: entry.content })),
-          ...messages
+          ...requestMessages
         ],
         // Groq's current API uses max_completion_tokens for its multimodal models.
         max_completion_tokens: 2048,
-        stream: !toolsEnabled,
-        ...(toolsEnabled ? {
+        stream: !includeTools,
+        ...(includeTools ? {
           tool_choice: "auto",
           tools: [{ type: "browser_search" }, { type: "code_interpreter" }]
         } : {})
       }),
       signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(toolsEnabled ? 90000 : 60000)])
-        : AbortSignal.timeout(toolsEnabled ? 90000 : 60000)
+        ? AbortSignal.any([signal, AbortSignal.timeout(includeTools ? 90000 : 60000)])
+        : AbortSignal.timeout(includeTools ? 90000 : 60000)
     });
+    let response = await fetch(apiUrl, makeRequest(messages, toolsEnabled));
+
+    // Tool support can be disabled for a particular account/model even when
+    // the model ID is supported. Retry once as ordinary text generation and
+    // explicitly prevent the fallback answer from claiming tool execution.
+    if (toolsEnabled && response.status === 400) {
+      console.warn("Groq rejected built-in tools; retrying without tools", {
+        requestId: agentOptions.requestId,
+        model
+      });
+      await response.body?.cancel().catch(() => {});
+      toolsEnabled = false;
+      agentOptions.onStatus?.("Live tools are unavailable; preparing a standard response…");
+      response = await fetch(apiUrl, makeRequest([
+        ...messages,
+        {
+          role: "system",
+          content: "Live browser search and code execution are unavailable for this response. Do not claim to have searched, calculated using code, or executed any tool. State when current information cannot be verified."
+        }
+      ], false));
+    }
 
     if (!response.ok) {
       const providerError = await response.json().catch(() => null);
@@ -108,15 +129,11 @@ Current date and time: ${currentDate} (UTC). Live search and code tools are not 
       console.error("Groq chat completion rejected", {
         requestId: agentOptions.requestId,
         status: response.status,
-        code: providerError?.error?.code || providerError?.error?.type || "unknown",
-        message: typeof providerError?.error?.message === "string" ? providerError.error.message.slice(0, 200) : ""
+        providerErrorPresent: Boolean(providerError?.error)
       });
       const statusCode = response.status === 429 ? 503 : 502;
       if (containsImage && [400, 404].includes(response.status)) {
         throw new AIProviderError("The configured vision model could not process this image. Check GROQ_VISION_MODEL and try a PNG, JPEG, or WebP image under 5 MB.", statusCode);
-      }
-      if (toolsEnabled && response.status === 400) {
-        throw new AIProviderError("Live agent tools were rejected by the Groq API. Check model access and built-in tool availability for this project.", statusCode);
       }
       throw new AIProviderError("AI service is temporarily unavailable", statusCode);
     }

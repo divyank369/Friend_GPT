@@ -37,6 +37,8 @@ function Chatwindow() {
     const [profileStatus, setProfileStatus] = useState("");
     const [imagePrompt, setImagePrompt] = useState("");
     const [generatedImages, setGeneratedImages] = useState([]);
+    const [imageBusy, setImageBusy] = useState(false);
+    const [imageStatus, setImageStatus] = useState("");
     const [imageDeleteStatus, setImageDeleteStatus] = useState("");
     const accountMenuRef = useRef(null);
     const requestInFlight = useRef(false);
@@ -155,8 +157,8 @@ function Chatwindow() {
     // Image generation is rate-limited and billed by the configured provider, so it is an explicit action.
     const generateImage = async (event) => {
         event.preventDefault();
-        setKnowledgeBusy(true);
-        setKnowledgeStatus("");
+        setImageBusy(true);
+        setImageStatus("");
         try {
             const response = await apiFetch("/api/images/generate", {
                 method: "POST",
@@ -166,12 +168,12 @@ function Chatwindow() {
             const result = await response.json().catch(() => null);
             if (!response.ok) throw new Error(result?.error || "Could not generate image");
             setGeneratedImages((images) => [result, ...images.filter((image) => image.fileId !== result.fileId)].slice(0, 20));
-            setKnowledgeStatus("Image generated");
+            setImageStatus("Image generated");
             setImagePrompt("");
         } catch (error) {
-            setKnowledgeStatus(error.message || "Could not generate image");
+            setImageStatus(`Error: ${error.message || "Could not generate image"}`);
         } finally {
-            setKnowledgeBusy(false);
+            setImageBusy(false);
         }
     };
 
@@ -342,7 +344,9 @@ function Chatwindow() {
                 });
                 setRequestError({
                     threadId: requestThreadId,
-                    message: err.message || "Could not send your message. Please try again."
+                    message: err.name === "TypeError"
+                        ? "Could not connect to SigmaGPT. Check your connection and try again."
+                        : err.message || "Could not send your message. Please try again."
                 });
             }
         } finally {
@@ -492,8 +496,10 @@ function Chatwindow() {
                                 <div><strong id="image-generation-title">Generate an image</strong><p>Generated images are saved privately to your account.</p></div>
                                 <form className="knowledge-form" onSubmit={generateImage}>
                                     <label>Image prompt<textarea maxLength={2000} onChange={(event) => setImagePrompt(event.target.value)} required rows={3} value={imagePrompt} /></label>
-                                    <button disabled={knowledgeBusy || !imagePrompt.trim()} type="submit">{knowledgeBusy ? "Working…" : "Generate image"}</button>
+                                    <button disabled={imageBusy || !imagePrompt.trim()} type="submit">{imageBusy ? "Generating…" : "Generate image"}</button>
                                 </form>
+                                {imageBusy && <p aria-live="polite" className="knowledge-status">Generating your image…</p>}
+                                {imageStatus && <p aria-live="polite" className="knowledge-status" role={imageStatus.startsWith("Error:") ? "alert" : "status"}>{imageStatus}</p>}
                                 {generatedImages.map((image) => <div className="generated-image-card" key={image.fileId}>
                                     <img className="generated-image-preview" alt={image.filename || "Generated result"} crossOrigin="use-credentials" src={apiUrl(image.url)} />
                                     <button onClick={() => deleteGeneratedImage(image.fileId)} type="button">Delete image</button>

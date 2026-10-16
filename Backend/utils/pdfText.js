@@ -13,6 +13,12 @@ export class PdfProcessingError extends Error {
 
 // Extract only selectable text. Image-only scans need OCR, which this upload path does not provide.
 export async function extractPdfText(buffer, maxCharacters = MAX_PDF_TEXT_CHARACTERS) {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+    throw new PdfProcessingError("This PDF is empty or invalid. Please upload a valid text-based PDF.");
+  }
+  if (!Number.isInteger(maxCharacters) || maxCharacters < 1) {
+    throw new PdfProcessingError("Could not read this PDF. Please try a smaller document.");
+  }
   let loadingTask;
   try {
     loadingTask = getDocument({

@@ -43,3 +43,11 @@ test("returns a clear message for scanned PDFs without selectable text", async (
     error instanceof PdfProcessingError && /no selectable text/i.test(error.message)
   );
 });
+
+test("rejects empty and malformed PDFs with a user-friendly error", async () => {
+  for (const input of [Buffer.alloc(0), Buffer.from("not a PDF")]) {
+    await assert.rejects(extractPdfText(input), (error) =>
+      error instanceof PdfProcessingError && /valid text-based PDF|empty or invalid/i.test(error.message)
+    );
+  }
+});
