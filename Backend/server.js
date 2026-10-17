@@ -9,10 +9,15 @@ import rateLimit from "express-rate-limit";
 import knowledgeRoutes from "./routes/knowledge.js";
 import KnowledgeChunk from "./models/KnowledgeChunk.js";
 import Thread from "./models/Thread.js";
+import PreviewSession from "./models/PreviewSession.js";
+import WebsiteDeployment from "./models/WebsiteDeployment.js";
 import imageRoutes from "./routes/images.js";
+import websiteBuilderRoutes from "./routes/websiteBuilder.js";
+import websiteDeploymentRoutes from "./routes/websiteDeployments.js";
 import { createOriginGuard, parseAllowedOrigins } from "./security/originPolicy.js";
 import { cleanupExpiredUploads, cleanupOrphanedGridFSChunks } from "./utils/fileLifecycle.js";
 import { GridFSBucket } from "mongodb";
+import { callSandbox } from "./utils/sandboxService.js";
 
 
  const app = express();
@@ -33,6 +38,7 @@ app.use(cors({
   credentials: true
 }));
 app.use(createOriginGuard(allowedOrigins));
+app.use("/api/website-builder", express.json({ limit: "1mb" }));
 app.use(express.json({ limit: "64kb" }));
 app.use(cookieParser());
 
@@ -73,6 +79,34 @@ const imageUploadLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: "Too many image uploads. Please try again later." }
 });
+const previewStartLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many preview starts. Please try again later." }
+});
+const websiteGenerationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many website generation requests. Please try again later." }
+});
+const websiteRepairLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many repair attempts. Please try again later." }
+});
+const websiteDeploymentLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many deployment requests. Please try again later." }
+});
 
 app.use("/api", apiLimiter);
 app.use("/api/auth", (req, res, next) => {
@@ -90,6 +124,14 @@ app.use("/api/knowledge", knowledgeRoutes);
 app.use("/api/images/generate", imageGenerationLimiter);
 app.use("/api/images/upload", imageUploadLimiter);
 app.use("/api/images", imageRoutes);
+app.use("/api/website-builder/generate", websiteGenerationLimiter);
+app.use("/api/website-builder/projects/:projectId/fix", websiteRepairLimiter);
+app.use("/api/website-builder/projects/:projectId/deployments", websiteDeploymentLimiter);
+app.use("/api/website-builder/deployments/:deploymentId", websiteDeploymentLimiter);
+app.use("/api/website-builder/deployments/:deploymentId/redeploy", websiteDeploymentLimiter);
+app.use("/api/website-builder/projects", (req, res, next) => req.method === "POST" ? previewStartLimiter(req, res, next) : next());
+app.use("/api/website-builder", websiteBuilderRoutes);
+app.use("/api/website-builder", websiteDeploymentRoutes);
 
 app.use((error, _req, res, _next) => {
   const statusCode = error.status === 413 ? 413 : error.status === 400 ? 400 : 500;
@@ -124,6 +166,8 @@ const startServer = async () => {
   // Create indexes used for private knowledge retrieval and attachment reference checks.
   await KnowledgeChunk.createIndexes();
   await Thread.createIndexes();
+  await PreviewSession.createIndexes();
+  await WebsiteDeployment.createIndexes();
   await mongoose.connection.db.collection("images.files").createIndex({ "metadata.generated": 1, uploadDate: 1 });
   await mongoose.connection.db.collection("images.files").createIndex({ "metadata.pendingExpiresAt": 1 });
   await mongoose.connection.db.collection("images.files").createIndex({ "metadata.cleanupAfter": 1 });
@@ -148,6 +192,23 @@ const startServer = async () => {
   void sweepExpiredUploads();
   const cleanupTimer = setInterval(sweepExpiredUploads, 60 * 60 * 1000);
   cleanupTimer.unref();
+
+  const cleanupExpiredPreviews = async () => {
+    const expired = await PreviewSession.find({ expiresAt: { $lte: new Date() }, status: { $in: ["building", "running"] } }).limit(50);
+    for (const session of expired) {
+      const sessionIds = [session.runnerSessionId || session.sessionId, session.repair?.candidateSessionId].filter(Boolean);
+      await Promise.all(sessionIds.map((sessionId) => callSandbox("DELETE", `/v1/sessions/${encodeURIComponent(sessionId)}`).catch(() => {})));
+      session.status = "expired";
+      session.previewToken = "revoked";
+      if (session.repair) { session.repair.cancelled = true; session.markModified("repair"); }
+      await session.save();
+    }
+  };
+  void cleanupExpiredPreviews().catch((error) => console.error("Expired preview cleanup deferred", { name: error.name }));
+  const previewCleanupTimer = setInterval(() => {
+    void cleanupExpiredPreviews().catch((error) => console.error("Expired preview cleanup deferred", { name: error.name }));
+  }, 60 * 1000);
+  previewCleanupTimer.unref();
 
   app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);

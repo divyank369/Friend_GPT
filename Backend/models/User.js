@@ -35,7 +35,8 @@ const userSchema = new mongoose.Schema({
         type: String,
         maxlength: 2048,
         default: ""
-    }
+    },
+    websiteDeploymentLockUntil: { type: Date, default: null }
 }, { timestamps: true });
 
 export default mongoose.model("User", userSchema);

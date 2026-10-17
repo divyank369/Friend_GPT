@@ -6,6 +6,7 @@ import { apiFetch, apiUrl } from "./api";
 
 // Load Markdown and syntax-highlighting dependencies with the authenticated chat view.
 const Chat = lazy(() => import("./Chat"));
+const WebsiteBuilder = lazy(() => import("./WebsiteBuilder"));
 
 function Chatwindow() {
     const {
@@ -17,7 +18,9 @@ function Chatwindow() {
         currThreadId,
         setPrevChats,
         setAllThreads,
-        setSidebarOpen
+        setSidebarOpen,
+        websiteBuilderMode,
+        setWebsiteBuilderMode
     } = useContext(MyContext);
 
     const [loading, setLoading] = useState(false);
@@ -401,9 +404,11 @@ function Chatwindow() {
                     <i className="fa-solid fa-bars" aria-hidden="true"></i>
                 </button>
                 <span>
-                    SigmaGPT &nbsp;
-                    <i className="fa-solid fa-angle-down"></i>
+                    {websiteBuilderMode ? "Website Builder" : "SigmaGPT"}
                 </span>
+                <button aria-pressed={websiteBuilderMode} className="mode-toggle" onClick={() => setWebsiteBuilderMode((mode) => !mode)} type="button">
+                    {websiteBuilderMode ? "Back to chat" : "Website Builder"}
+                </button>
 
                 <div className="userIconDiv" ref={accountMenuRef}>
                     <button
@@ -558,9 +563,10 @@ function Chatwindow() {
                 </div>
             )}
 
-            <Suspense fallback={<div className="chat-loading">Loading conversation…</div>}>
-                <Chat />
-            </Suspense>
+            {websiteBuilderMode ? (
+                <Suspense fallback={<div className="chat-loading">Loading website builder…</div>}><WebsiteBuilder /></Suspense>
+            ) : <>
+                <Suspense fallback={<div className="chat-loading">Loading conversation…</div>}><Chat /></Suspense>
 
             <ScaleLoader
                 color="#fff"
@@ -633,6 +639,7 @@ function Chatwindow() {
                 </p>
 
             </div>
+            </>}
 
         </div>
     );

@@ -28,6 +28,17 @@
     font-size: 14px;
     font-weight: 600;
 }
+.mode-toggle {
+    padding: 7px 10px;
+    border: 1px solid #454545;
+    border-radius: 6px;
+    background: #292929;
+    color: #ddd;
+    font-size: 12px;
+    cursor: pointer;
+}
+.mode-toggle:hover { background: #353535; }
+.mode-toggle:focus-visible { outline: 2px solid #b9d8d0; outline-offset: 2px; }
 
 .history-toggle {
     width: 36px;

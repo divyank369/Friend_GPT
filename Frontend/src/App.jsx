@@ -16,6 +16,7 @@ function App() {
     const [newChat, setNewChat] = useState(true);
     const [allThreads, setAllThreads] = useState([]);
     const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [websiteBuilderMode, setWebsiteBuilderMode] = useState(false);
     const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
     useEffect(() => {
@@ -46,7 +47,9 @@ function App() {
         allThreads,
         setAllThreads,
         sidebarOpen,
-        setSidebarOpen
+        setSidebarOpen,
+        websiteBuilderMode,
+        setWebsiteBuilderMode
     };
 
     let content;
