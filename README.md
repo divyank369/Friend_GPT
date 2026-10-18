@@ -1,110 +1,66 @@
-# SigmaGPT
+# SigmaGPT — Friend_GPT
 
-SigmaGPT is a full-stack AI chat application with a React interface, an Express API, and MongoDB-backed conversation history. Assistant responses stream to the browser as they are generated, while each completed exchange is stored in the conversation thread.
+A full-stack AI chat application with a React interface, an Express API, and MongoDB-backed conversations. It streams assistant responses to the browser and includes private knowledge sources, file-aware chat, image generation, and an optional website builder.
 
-## Features
+## Highlights
 
-- Email and password registration and sign-in, plus Google sign-in
-- Private conversation history associated with the authenticated user
-- User-managed text knowledge sources, retrieved privately for relevant answers
-- Authenticated PNG/JPEG/WebP image and PDF uploads; image-aware chat and resume PDF text extraction
-- Server-side image generation stored in the user's private image library
-- Agent request planning with Groq live web search and code execution for text chats
-- Request level agent activity and duration logs for production troubleshooting
-- Preferred name saved to the account and used across conversations
-- Progressive assistant responses over Server-Sent Events (SSE)
-- Markdown rendering with GitHub Flavored Markdown and highlighted code blocks
-- Thread creation, history listing, loading, and deletion
-- Responsive React/Vite frontend and Express API
-- Render Blueprint configuration for deployment
+- Email/password and Google sign-in
+- Private conversation history and text knowledge sources
+- Streaming chat responses with Markdown and code highlighting
+- Image and PDF attachments, image-aware chat, and resume text extraction
+- User-owned generated image library
+- Optional web search and code execution for supported text models
+- Website preview, repair, and deployment workflows
+- Responsive React and Vite frontend
 
-## Technology Stack
+## Architecture
 
-| Area | Technologies |
+| App | Role |
 | --- | --- |
-| Frontend | React 19, Vite, React Markdown, remark-gfm, rehype-highlight |
-| Backend | Node.js 22+, Express 5, Mongoose |
-| Database | MongoDB |
-| AI | LangGraph workflow, LangChain prompt formatting, Groq text/vision chat, OpenAI image generation API |
-| Authentication | JWT, HTTP-only cookies, bcryptjs, Google ID token verification |
-| Supporting tools | Vite, Node.js crypto UUIDs, express-rate-limit, CORS, cookie-parser |
+| `Backend/` | Express API, authentication, AI workflow, uploads, and deployment services |
+| `Frontend/` | React and Vite chat and website-builder interface |
+| `SandboxRunner/` | Isolated runner used by website-building workflows |
+| `render.yaml` | Render service blueprint |
 
-## How It Works
+## Technology
 
-1. The React app checks the current session with `GET /api/auth/me` and sends API requests with cookies included.
-2. The user submits a message to `POST /api/chat` with a conversation ID. The backend authenticates the session and retrieves or initializes that user's thread.
-3. LangGraph plans the request: text requests use the agent model, while requests with images use the vision model. It retrieves relevant private knowledge for both paths.
-4. For text requests on a supported GPT-OSS model, Groq can call its built-in `browser_search` and `code_interpreter` tools. The model chooses whether current information or exact computation is needed, receives tool results, and writes the final answer. Image requests use Qwen vision and do not receive those built-in tools.
-5. The agent reports its planning status over SSE. Tool-enabled responses are returned after Groq finishes its search/tool loop; vision responses continue streaming as generated. Once generation completes, the backend saves the user message and full assistant response to MongoDB as one exchange.
-6. Each request receives a trace ID. Backend logs record its mode, duration, selected model, and provider failures without logging the user's message.
+React 19 · Vite · Node.js 22.12+ · Express 5 · MongoDB · LangGraph · Groq · OpenAI image generation API
 
-If the client disconnects, the active provider request is aborted. Incomplete provider streams are treated as errors and are not saved as completed responses.
+## Get Started
 
-## Project Structure
-
-```text
-.
-├── Backend/
-│   ├── middleware/       # Session authentication
-│   ├── models/           # Mongoose User and Thread schemas
-│   ├── routes/           # Authentication and chat/thread API routes
-│   ├── tests/            # Backend tests
-│   ├── utils/            # AI provider integration and streaming parser
-│   └── server.js         # Express setup and application startup
-├── Frontend/
-│   ├── public/           # Static frontend assets
-│   └── src/              # React app, chat UI, context, and API client
-└── render.yaml           # Render API and static-site Blueprint
-```
-
-## Getting Started
-
-### Prerequisites
+### Requirements
 
 - Node.js 22.12 or later and npm
-- A MongoDB instance (local or hosted)
-- A Groq API key
-- A Google OAuth web client ID if Google sign-in is needed
+- MongoDB, local or hosted
+- Groq API key
+- Google OAuth web client ID if Google sign-in is needed
+- OpenAI API key if image generation is needed
 
-### Configure Environment
+### Configure environment
 
-From the repository root, copy the example files:
+Copy the example environment files:
 
 ```powershell
 Copy-Item Backend/.env.example Backend/.env
 Copy-Item Frontend/.env.example Frontend/.env
 ```
 
-Set these backend variables in `Backend/.env`:
+Set the backend values in `Backend/.env`:
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `MONGODB_URI` | Yes | MongoDB connection string |
-| `GROQ_API_KEY` | Yes | Server-side API key used for AI requests |
-| `AUTH_JWT_SECRET` | Yes | Secret used to sign session tokens; use a long random value |
-| `GOOGLE_CLIENT_ID` | For Google sign-in | Google OAuth web client ID; the server verifies Google ID tokens against it |
-| `FRONTEND_ORIGIN` | Production | Comma-separated exact frontend origins (scheme and host, no paths); local development defaults to `http://localhost:5173` |
-| `SESSION_COOKIE_SAME_SITE` | No | `none` by default in production for the separate Render `onrender.com` sites; local development defaults to `lax`. Use `lax` for a same-site custom-domain deployment. `none` always requires HTTPS. |
-| `GROQ_MODEL` | No | Model override; defaults to `openai/gpt-oss-20b` |
-| `GROQ_API_URL` | No | OpenAI-compatible API URL override |
-| `GROQ_VISION_MODEL` | No | Vision-capable Groq model for attached images; defaults to `qwen/qwen3.8-27b` |
-| `OPENAI_API_KEY` | For image generation | Server-side key for the OpenAI image generation API; never expose it to the frontend |
-| `OPENAI_IMAGE_MODEL` | No | Image model override; defaults to `gpt-image-2` |
+| Variable | Purpose |
+| --- | --- |
+| `MONGODB_URI` | MongoDB connection string |
+| `GROQ_API_KEY` | Server-side key for chat generation |
+| `AUTH_JWT_SECRET` | Secret used to sign session tokens |
+| `GOOGLE_CLIENT_ID` | Google OAuth web client ID, when Google sign-in is enabled |
+| `FRONTEND_ORIGIN` | Allowed frontend origin or origins in production |
+| `OPENAI_API_KEY` | Required for image generation |
 
-Set these frontend variables in `Frontend/.env`:
+Set `VITE_GOOGLE_CLIENT_ID` in `Frontend/.env` to enable Google sign-in in the browser. The frontend API URL defaults to `http://localhost:8080` in development. Keep provider secrets on the backend; never put them in frontend variables.
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `VITE_API_URL` | No | API base URL; defaults to `http://localhost:8080` in development |
-| `VITE_GOOGLE_CLIENT_ID` | For Google sign-in | The same public Google OAuth web client ID used by the backend |
+### Run the apps
 
-Never put `GROQ_API_KEY` or other server secrets in frontend environment variables. To enable Google sign-in locally, add `http://localhost:5173` as an authorized JavaScript origin in the Google OAuth client configuration.
-
-The default `openai/gpt-oss-20b` text model supports Groq's built-in live search and code interpreter, so no separate search API key is needed. `GROQ_MODEL` can be set to `openai/gpt-oss-120b` to use the other supported model. Custom text models or non-Groq API endpoints run without these built-in tools. The tools are read-only: SigmaGPT can search and calculate, but it cannot send messages, change external accounts, or take other actions on your behalf. Uploaded images use the separate `GROQ_VISION_MODEL` path and are not sent to web search.
-
-### Install and Run
-
-Start the backend in one terminal:
+In one terminal:
 
 ```powershell
 cd Backend
@@ -112,7 +68,7 @@ npm install
 npm run dev
 ```
 
-Start the frontend in another terminal:
+In a second terminal:
 
 ```powershell
 cd Frontend
@@ -120,84 +76,14 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite, normally `http://localhost:5173`. The API listens on port `8080` by default.
-
-## Authentication and Data
-
-- Passwords are hashed with bcryptjs; the password hash is excluded from normal user queries.
-- Successful sign-in sets a signed JWT in the `friendgpt_session` HTTP-only cookie. Sessions expire after seven days.
-- Production session cookies are `Secure`, `HttpOnly`, and `SameSite=None` by default because Render's `onrender.com` hostnames are separate sites. Use `SESSION_COOKIE_SAME_SITE=lax` when deploying frontend and API under a same-site custom domain; state-changing requests always require an exact allowed `Origin`.
-- Every state-changing request (including sign-in and sign-out) must include an `Origin` matching `FRONTEND_ORIGIN`; requests without an origin are rejected. Keep this list limited to trusted frontend origins.
-- Google credentials are verified server-side using the Google ID token and configured client ID.
-- Chat and thread endpoints require an authenticated session. Thread lookups and writes are scoped to the session user's ID.
-- The API rate-limits requests globally, with stricter limits for authentication and chat generation.
-- A thread contains its owner, thread ID, title, and ordered messages. Messages use `user` or `assistant` roles with content and timestamps.
-- Knowledge sources are pasted as text in Settings, split into overlapping chunks, and stored under the signed-in user's ID. MongoDB text search retrieves up to four relevant chunks for each answer; matching excerpts are treated as untrusted reference material and the model is asked to cite their titles.
-- Knowledge retrieval currently uses MongoDB full-text search. It is durable and needs no additional embedding provider, but it has lower semantic recall than vector search and only accepts pasted text (no file parsing yet).
-- Text agent requests can use Groq-hosted web search for changing facts and a sandboxed code interpreter for calculations. Search results are untrusted input; the model is instructed to cite current claims and not treat page content as instructions. Live tools are available only with the supported GPT-OSS models and standard Groq API endpoint.
-- Agent tools do not execute external write actions. Adding company APIs or MCP integrations should use explicit per-tool permissions, ownership checks, input validation, timeouts, and audit records before exposing any action to the model.
-- Images and PDFs are stored in MongoDB GridFS with owner metadata. Uploads accept PNG, JPEG, WebP, or PDF files up to 5 MB; each chat request can attach up to three files. Images use the configured vision model, while PDFs contribute up to 18,000 characters of selectable text across a maximum of 25 pages. Scanned PDFs without selectable text need to be uploaded as page images. Generated images require `OPENAI_API_KEY` and are served through owner-checked routes.
-- The preferred name is stored on the account profile rather than in per-thread data, so it is available in all conversations for that signed-in user.
-- The completed user/assistant exchange is persisted once generation succeeds; individual streamed tokens are not separate database messages.
-
-## API Reference
-
-All routes are served from the backend origin and return API errors in an `error` field. Authentication routes are under `/api/auth`; chat, thread, and knowledge routes are under `/api`.
-
-| Method | Endpoint | Authentication | Purpose |
-| --- | --- | --- | --- |
-| `POST` | `/api/auth/signup` | No | Create an account with `name`, `email`, and `password` |
-| `POST` | `/api/auth/login` | No | Sign in with `email` and `password` |
-| `POST` | `/api/auth/google` | No | Sign in with a Google `idToken` |
-| `GET` | `/api/auth/me` | Yes | Return the current user |
-| `PATCH` | `/api/auth/profile` | Yes | Save the account-wide preferred name |
-| `POST` | `/api/auth/logout` | No | Clear the session cookie |
-| `POST` | `/api/chat` | Yes | Send a message and receive an SSE response stream |
-| `GET` | `/api/thread` | Yes | List the current user's threads |
-| `GET` | `/api/thread/:threadId` | Yes | Load one thread's messages |
-| `DELETE` | `/api/thread/:threadId` | Yes | Delete one of the current user's threads |
-| `GET` | `/api/knowledge` | Yes | List the current user's text knowledge sources |
-| `POST` | `/api/knowledge` | Yes | Add a titled text source for retrieval |
-| `DELETE` | `/api/knowledge/:sourceId` | Yes | Delete one of the current user's knowledge sources |
-| `POST` | `/api/images/upload` | Yes | Upload one PNG, JPEG, or WebP image (up to 5 MB) |
-| `POST` | `/api/images/generate` | Yes | Generate an image from a prompt (requires `OPENAI_API_KEY`) |
-| `GET` | `/api/images` | Yes | List the current user's 20 most recent generated images |
-| `GET` | `/api/images/:fileId` | Yes | Read an image owned by the current user |
-| `GET` | `/health` | No | Report API and database health |
-
-### Chat Request and Stream
-
-Send JSON to `POST /api/chat`:
-
-```json
-{
-  "threadId": "conversation-id",
-  "message": "Explain React hooks",
-  "imageIds": []
-}
-```
-
-For image messages, upload each file first as multipart form data (`image` field) to `/api/images/upload` and pass the returned `fileId` values in `imageIds`. The request accepts at most three images.
-
-Successful responses use `Content-Type: text/event-stream`. Token events contain one token each:
-
-```text
-data: {"token":"React hooks"}
-
-```
-
-The stream ends with a `done` event. If an error occurs after streaming has started, the server sends an `error` event; errors before streaming begins are returned as JSON with an appropriate HTTP status. Messages are limited to 8,000 characters, and the model context is bounded to recent conversation history.
+The API uses port `8080` by default. Vite prints the frontend URL, normally `http://localhost:5173`.
 
 ## Development Checks
-
-Run backend tests:
 
 ```powershell
 cd Backend
 npm test
 ```
-
-Lint and build the frontend:
 
 ```powershell
 cd Frontend
@@ -205,6 +91,8 @@ npm run lint
 npm run build
 ```
 
-## Deployment
+## Notes
 
-The root `render.yaml` defines an Express API service and a static Vite frontend. The API uses `/health` as its health check; the frontend rewrites application routes to `index.html`. Configure the production MongoDB URI, Groq key, Google client ID, frontend origin, and session secret in Render. The Blueprint generates `AUTH_JWT_SECRET` and connects the frontend's `VITE_API_URL` to the API service.
+The app stores user conversations, knowledge sources, uploads, and generated images in MongoDB. Live search and code execution are available only through supported Groq text models. Uploaded images use the configured vision model; PDF parsing extracts selectable text. Review `SANDBOX_DEPLOYMENT.md` before enabling website sandbox or deployment features.
+
+See `render.yaml` for the production service layout and `Backend/.env.example` for the current environment configuration.
